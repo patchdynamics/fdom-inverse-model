@@ -17,6 +17,16 @@ classdef haddam_fdom < handle
         event_total_sizes = [];
         
         metabasin_precipitation_totals;
+        
+        usgs_timeseries_subset;
+        usgs_timeseries_subset_timestamps;
+        
+        % inverse modeling
+        num_hysteresis_days = 14;
+        K;
+        y;
+        a;
+        fdom_predicted;
     end
     
     methods(Static)
@@ -50,8 +60,24 @@ classdef haddam_fdom < handle
             hf.filter_discharge();
             disp 'finding precipitation events'
             hf.find_precipitation_events();
+            close all;
             
         end
+        
+        function [hf] = start_usgs_and_precip_analysis()
+            hf = haddam_fdom.start_usgs_and_precip();
+            hf.plot_precipitation_vs_cdom
+            hf.plot_precipitation_vs_discharge
+        end
+        
+        function [hf] = start_usgs_and_inverse_model()
+            hf = haddam_fdom.start_usgs_and_precip();
+            hf.build_predictor_matrix;
+            hf.solve_inverse;
+            hf.predict_fdom;
+        end
+        
+        
     end
     
     methods
@@ -74,6 +100,7 @@ classdef haddam_fdom < handle
             curs = exec(obj.conn,sqlquery);
             setdbprefs('DataReturnFormat','structure');
             curs = fetch(curs);
+            curs.Data
             obj.usgs_timeseries = curs.Data;
             obj.usgs_timeseries_timestamps = datenum(obj.usgs_timeseries.timestamp);
             
@@ -182,28 +209,56 @@ classdef haddam_fdom < handle
         end
         
         function plot_precipitation_vs_discharge(obj)
-            figure;
-            [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
-                obj.precipitation_timestamps, obj.precipitation_data.total_precipitation, ...
-                'plot', 'stem');
+            f = figure;
+            set(gca,'Position',[.05 .05 .9 .9]);
+            plotedit on;
+            set(f, 'Position', [0 0 1600 300]);
+            %[hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
+            %   obj.precipitation_timestamps, obj.precipitation_data.total_precipitation, ...
+            %   'plot', 'stem');
             %datetick(hax(1));
             %datetick(hax(2));
+            
+            subplot(2,1,1);
+            plot(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge);
+            title('Discharge');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            datetick('x');
+            
+            subplot(2,1,2);
+            stem(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
+            title('Precipitation');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            datetick('x');
         end
         
         function plot_precipitation_vs_cdom(obj)
             figure;
-            [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries.cdom, ...
-                obj.precipitation_timestamps, obj.precipitation_data.total_precipitation, ...
-                'plot', 'stem');
+            %[hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries.cdom, ...
+            %    obj.precipitation_timestamps, obj.precipitation_data.total_precipitation, ...
+            %    'plot', 'stem');
             %datetick(hax(1));
             %datetick(hax(2));
+            %xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            
+            subplot(2,1,1);
+            plot(obj.usgs_timeseries_timestamps, obj.usgs_timeseries.cdom);
+            title('CDOM');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            datetick('x');
+            
+            subplot(2,1,2);
+            stem(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
+            title('Precipitation');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            datetick('x');
         end
         
         function find_precipitation_events(obj)
             
             % process for events
             in_event = false;
-            event_threshold = 1000;
+            event_threshold = 500;
             event_start_date = 0;
             event_end_date = 0;
             event_total_size = 0;
@@ -257,11 +312,30 @@ classdef haddam_fdom < handle
             [hax, hLine1, hLine2] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries.cdom, obj.event_start_dates, obj.event_total_sizes, 'plot', 'stem');
             %set(hLine1,'color','red');
             %set(hLine2,'color','blue');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
             title('Precipitation Events and CDOM');
         end
         
+        function plot_events_and_discharge(obj)
+            % events and CDOM
+            f = figure;
+            set(gca,'Position',[.05 .05 .9 .9]);
+            plotedit on;
+            set(f, 'Position', [0 0 1600 300]);
+            %[hax, hLine1, hLine2] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, obj.event_start_dates, obj.event_total_sizes, 'plot', 'stem');
+            %set(hLine1,'color','red');
+            %set(hLine2,'color','blue');
+            %datetick(hax(1));
+            %datetick(hax(2));
+            subplot(2,1,1);
+            plot(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge);
+            subplot(2,1,2);
+            stem(obj.event_start_dates, obj.event_total_sizes);
+            title('Precipitation Events');
+        end
+        
         function load_metabasin_totals(obj)
-            sqlquery = sprintf('select metabasin_totals.gid, metabasin_totals.name, array_agg(to_char(timestamp, ''yyyymmdd'')) timestamps,  array_agg(sum) sums from metabasin_totals join metabasinpolygons on metabasin_totals.gid = metabasinpolygons.gid where timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'')  group by metabasin_totals.gid, metabasin_totals.name, metabasinpolygons.sort order by sort',  ... 
+            sqlquery = sprintf('select metabasin_totals.gid, metabasin_totals.name, array_agg(to_char(timestamp, ''yyyymmdd'')) timestamps,  array_agg(sum) sums from metabasin_totals join metabasinpolygons on metabasin_totals.gid = metabasinpolygons.gid where timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'')  group by metabasin_totals.gid, metabasin_totals.name, metabasinpolygons.sort order by sort',  ...
                 obj.start_date, obj.end_date)
             curs = exec(obj.conn,sqlquery);
             setdbprefs('DataReturnFormat','structure');
@@ -270,10 +344,10 @@ classdef haddam_fdom < handle
             
         end
         
-         function load_metabasin_totals_skip_spring(obj)
+        function load_metabasin_totals_skip_spring(obj)
             sqlquery = sprintf(['select metabasin_totals.gid, metabasin_totals.name, array_agg(to_char(timestamp, ''yyyymmdd'')) timestamps,  array_agg(sum) sums' ...
                 ' from metabasin_totals join metabasinpolygons on metabasin_totals.gid = metabasinpolygons.gid' ...
-                ' where month > 5 and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'')  group by metabasin_totals.gid, metabasin_totals.name, metabasinpolygons.sort order by sort'],  ... 
+                ' where month > 5 and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'')  group by metabasin_totals.gid, metabasin_totals.name, metabasinpolygons.sort order by sort'],  ...
                 obj.start_date, obj.end_date)
             curs = exec(obj.conn,sqlquery);
             setdbprefs('DataReturnFormat','structure');
@@ -281,9 +355,12 @@ classdef haddam_fdom < handle
             obj.metabasin_precipitation_totals = curs.Data
             
         end
-            
+        
         function plot_metabasin_totals(obj)
-            figure;
+            f=figure;
+            set(gca,'Position',[.05 .05 .9 .9]);
+            plotedit on;
+            set(f, 'Position', [0 0 1600 800]);
             hold on;
             for i=1:6
                 subplot(6,1,i);
@@ -301,6 +378,193 @@ classdef haddam_fdom < handle
             end
         end
         
+        function build_predictor_matrix(obj)
+            
+            % load the averaged values
+            % only predicted based off summer and fall, month greater than
+            % may, to avoid impact of snowmelt.
+            sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_download_usgs '...
+                'where cdom > 0 ' ...
+                'and month > 5 ' ...
+                'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], obj.start_date, obj.end_date);
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_timeseries_subset = curs.Data;
+            obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
+            
+            % y = a3 * p3 + a4 * p4 + a5 * p5 + c
+            % pi is precipitation total i days ago
+            
+            sample_count = size(obj.usgs_timeseries_subset_timestamps);
+            sample_count = sample_count(1);
+            %sample_count = 10;
+            obj.K = zeros(sample_count, obj.num_hysteresis_days + 2);
+            obj.y = zeros(sample_count, 1);
+            
+            % organize the precipitation for lookup
+            
+            x_map = containers.Map(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
+            x_map
+            
+            for i=1:sample_count
+                date = obj.usgs_timeseries_subset_timestamps(i);
+                
+                precip_totals = zeros(obj.num_hysteresis_days, 1);
+                for j = 1:obj.num_hysteresis_days
+                    d = datenum(date - days(j));
+                    precip_totals(j) = 0;
+                    if isKey(x_map, d)
+                        precip_totals(j) = x_map(d);
+                    end
+                end
+                
+                obj.K(i, 1) = 1;
+                for j = 1:obj.num_hysteresis_days
+                    obj.K(i, j+1) = precip_totals(j);
+                end
+                
+                d = str2double(datestr(date, 'dd'));
+                
+                %
+                % seasonal effect - autumn
+                %
+                
+                % this one didn't really work.
+                %obj.K(i, obj.num_hysteresis_days+2) = (d-100)^2;
+                
+                % just try adding some extra for nov, dec since we observe
+                % this
+                if( str2double(datestr(date, 'mm')) > 10)
+                    obj.K(i, obj.num_hysteresis_days+2) = 1;
+                else
+                    obj.K(i, obj.num_hysteresis_days+2) = 0;
+                end
+                
+                obj.y(i) = obj.usgs_timeseries_subset.cdom(i);
+            end
+            
+            obj.K
+            
+        end
+        
+        function solve_inverse(obj)
+            obj.K
+            Kt = transpose(obj.K);
+            obj.a = (Kt * obj.K) \ (Kt * obj.y);
+            obj.a
+        end
+        
+        function predict_fdom(obj)
+            syms fdom p3 p4 p5;
+            obj.a
+            
+            % load the averaged values
+            sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_download_usgs '...
+                'where cdom > 0 ' ...
+                'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], obj.start_date, obj.end_date);
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_timeseries_subset = curs.Data;
+            obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
+            
+            % y = a3 * p3 + a4 * p4 + a5 * p5 + c
+            % pi is precipitation total i days ago
+            
+            sample_count = size(obj.usgs_timeseries_subset_timestamps);
+            
+            % organize the precipitation for lookup
+            x_map = containers.Map(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
+            
+            
+            obj.fdom_predicted = zeros(sample_count);
+            
+            for i=1:sample_count(1)
+                date = obj.usgs_timeseries_subset_timestamps(i);
+                
+                precip_totals = zeros(obj.num_hysteresis_days, 1);
+                for j = 1:obj.num_hysteresis_days
+                    d = datenum(date - days(j));
+                    precip_totals(j) = 0;
+                    if isKey(x_map, d)
+                        precip_totals(j) = x_map(d);
+                    end
+                end
+                
+                % add up the predictor variables
+                obj.fdom_predicted(i) = obj.a(1);
+                for j = 2:obj.num_hysteresis_days
+                    obj.fdom_predicted(i) = obj.fdom_predicted(i) + obj.a(j) * precip_totals(j);
+                end
+                d = str2double(datestr(date, 'dd'));
+                
+                % parabolic didn't work very well
+                % obj.fdom_predicted(i) = obj.fdom_predicted(i) +  obj.a(obj.num_hysteresis_days + 2) * (d-100)^2;
+                
+                if( str2double(datestr(date, 'mm')) > 10)
+                    
+                    obj.fdom_predicted(i) = obj.fdom_predicted(i) +  obj.a(obj.num_hysteresis_days + 2)
+                end
+            end
+        end
+        
+        function plot_prediction(obj)
+            figure();
+            
+            subplot(4,1,1);
+            plot(obj.usgs_timeseries_subset_timestamps, obj.usgs_timeseries_subset.cdom);
+            datetick('x');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            title('Sensor CDOM');
+            
+            subplot(4,1,2);
+            plot(obj.usgs_timeseries_subset_timestamps, obj.fdom_predicted);
+            datetick('x');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            title('Modeled CDOM');
+            
+            
+            subplot(4,1,3);
+            plot(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
+            datetick('x');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            title('Precipitation');
+            
+            subplot(4,1,4);
+            [hax, ~, ~] = plotyy(obj.usgs_timeseries_subset_timestamps, obj.usgs_timeseries_subset.cdom, ...
+                obj.usgs_timeseries_subset_timestamps, obj.fdom_predicted);
+            datetick(hax(1));
+            datetick(hax(2));
+            set(hax(1),'YLim',[0 60])
+            set(hax(2),'YLim',[0 60])
+            set(hax(1),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
+            set(hax(2),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
+            
+        end
+        
+        function plot_prediction_yy(obj)
+            figure;
+            [hax, ~, ~] = plotyy(obj.usgs_timeseries_subset_timestamps, obj.usgs_timeseries_subset.cdom, ...
+                obj.usgs_timeseries_subset_timestamps, obj.fdom_predicted);
+            datetick(hax(1));
+            datetick(hax(2));
+            set(hax(1),'YLim',[0 60])
+            set(hax(2),'YLim',[0 60])
+            set(hax(1),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
+            set(hax(2),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
+        end
+        
+        function inverse_model(obj)
+            obj.build_predictor_matrix;
+            obj.solve_inverse;
+            obj.predict_fdom;
+            obj.plot_prediction;
+        end
     end
     
 end
