@@ -40,3 +40,21 @@ output
 csvwrite('prepared_seasonal_doc.csv', output);
 
 
+snowmelt = csvread('../snow/Zonal1-not-accurate.txt', 0, 12);
+figure;
+subplot(2,1,1);
+plot(snowmelt(1:3*365))
+xlim([0,3*365]);
+
+subplot(2,1,2);
+[hax, ~, ~] = plotyy(hf.usgs_timeseries_subset_timestamps, hf.usgs_timeseries_subset.cdom, ...
+    hf.usgs_timeseries_subset_timestamps, hf.fdom_predicted);
+datetick(hax(1));
+datetick(hax(2));
+set(hax(1),'YLim',[0 60])
+set(hax(2),'YLim',[0 60])
+set(hax(1),'XLim',[datenum(hf.start_date) datenum(hf.end_date)])
+set(hax(2),'XLim',[datenum(hf.start_date) datenum(hf.end_date)])
+title('Modeled and Sensor FDOM');
+legend('Sensor FDOM', 'Modeled FDOM');
+
