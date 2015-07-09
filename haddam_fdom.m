@@ -2,14 +2,14 @@ classdef haddam_fdom < handle
     
     properties
         % configuration
-        seasonal_doc_mode = 3; % modeled | step | 12 month, constants below
+        seasonal_mode = 3; % modeled | step | 12 month, constants below
         enable_y_intercept = false;
         
         % constants
-        seasonal_doc_mode_none = 0;
-        seasonal_doc_mode_step = 1;
-        seasonal_doc_mode_modeled = 2;
-        seasonal_doc_mode_12_month = 3;
+        seasonal_mode_none = 0;
+        seasonal_mode_step = 1;
+        seasonal_mode_modeled = 2;
+        seasonal_mode_12_month = 3;
         
         % vars
         conn;
@@ -40,7 +40,7 @@ classdef haddam_fdom < handle
         usgs_timeseries_subset_timestamps;
         
         % inverse modeling
-        num_hysteresis_days = 14;
+        num_history_days = 14;
         K;
         y;
         a;
@@ -136,7 +136,7 @@ classdef haddam_fdom < handle
         end
         
         function load_usgs_timeseries(obj)
-            sqlquery = sprintf(['select timestamp,cdom,discharge,doc_mass_flow from haddam_timeseries_usgs '...
+            sqlquery = sprintf(['select timestamp,cdom,discharge,doc_mass_flow,doxygen,nitrate,conductance,turbidity,ph,temperature from haddam_timeseries_usgs_extended '...
                 'where cdom > 0 and ' ...
                 'timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
                 'order by timestamp asc'], obj.start_date, obj.end_date);
@@ -212,6 +212,21 @@ classdef haddam_fdom < handle
             datetick('x');
             legend('USGS FDOM', 'Location', 'northwest');
         end
+        
+        
+        function plot_usgs(obj, field)
+            figure;
+            plot(obj.usgs_timeseries_timestamps, getfield(obj.usgs_timeseries, field));
+            datetick('x');
+        end
+        
+        function plot_usgs_yy(obj, field1, field2)
+            figure;
+            [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, getfield(obj.usgs_timeseries, field1), ...
+                obj.usgs_timeseries_timestamps, getfield(obj.usgs_timeseries, field2));
+            datetick(hax(1));
+            datetick(hax(2));
+        end 
         
         function plot_usgs_cdom(obj)
             figure;
@@ -296,6 +311,63 @@ classdef haddam_fdom < handle
             datetick('x');
         end
         
+        function plot_vs_filtered_discharge(obj, field)
+           figure;
+           [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
+                obj.usgs_timeseries_timestamps, getfield(obj.usgs_timeseries, field) );
+             datetick(hax(1));
+            datetick(hax(2));
+%            datetick('x', 'yy', 'keeplimits', 'keepticks');
+        end
+        
+        function plot_all_vs_filtered_discharge(obj)
+           figure;
+           
+           subplot(6, 1, 1);
+           [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
+                obj.usgs_timeseries_timestamps, obj.usgs_timeseries.cdom );
+            datetick(hax(1));
+            datetick(hax(2));
+            set(hax(2),'ylim',[0 50]);
+
+            subplot(6, 1, 2);
+           [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
+                obj.usgs_timeseries_timestamps, obj.usgs_timeseries.conductance );
+            datetick(hax(1));
+            datetick(hax(2));
+            
+            subplot(6, 1, 3);
+           [hax, ~, y1] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
+                obj.usgs_timeseries_timestamps, obj.usgs_timeseries.turbidity );
+            set(hax(2),'ylim',[0 100]);
+            datetick(hax(1));
+            datetick(hax(2));
+            
+            subplot(6, 1, 4);
+           [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
+                obj.usgs_timeseries_timestamps, obj.usgs_timeseries.nitrate );
+            datetick(hax(1));
+            datetick(hax(2));
+            
+            subplot(6, 1, 5);
+           [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
+                obj.usgs_timeseries_timestamps, obj.usgs_timeseries.doxygen );
+            datetick(hax(1));
+            datetick(hax(2));
+            set(hax(2),'ylim',[5 19]);
+
+            
+            subplot(6, 1, 6);
+           [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
+                obj.usgs_timeseries_timestamps, obj.usgs_timeseries.ph );
+            datetick(hax(1));
+            datetick(hax(2));
+            set(hax(2),'ylim',[6.5 9]);
+
+        end
+        
+        
+        s
         function plot_usgs_cdom_and_filtered_discharge(obj)
             figure;
             [hax, ~, ~] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge, ...
@@ -605,7 +677,7 @@ classdef haddam_fdom < handle
             sample_count = size(timestamps);
             sample_count = sample_count(1);
             %sample_count = 10;
-            obj.K = zeros(sample_count, obj.num_hysteresis_days + 1);  % should size based off seasonal mode
+            obj.K = zeros(sample_count, obj.num_history_days + 1);  % should size based off seasonal mode
             obj.y = zeros(sample_count, 1);
             
             % organize the precipitation for lookup
@@ -614,8 +686,8 @@ classdef haddam_fdom < handle
             for i=1:sample_count
                 date = obj.usgs_timeseries_subset_timestamps(i);
                 
-                precip_totals = zeros(obj.num_hysteresis_days, 1);
-                for j = 1:obj.num_hysteresis_days
+                precip_totals = zeros(obj.num_history_days, 1);
+                for j = 1:obj.num_history_days
                     if(j == 1)
                         d = date;  % start with the current day
                     else
@@ -633,7 +705,7 @@ classdef haddam_fdom < handle
                     obj.K(i, 1) = 1;  % so an idea is to change the forward problem to remove y offset
                 end
                 
-                for j = offset+1:obj.num_hysteresis_days+offset
+                for j = offset+1:obj.num_history_days+offset
                     obj.K(i, j) = precip_totals(j-offset);
                 end
                 
@@ -643,22 +715,22 @@ classdef haddam_fdom < handle
                 % seasonal effect - autumn
                 %
                 
-                if(obj.seasonal_doc_mode == obj.seasonal_doc_mode_step )
+                if(obj.seasonal_mode == obj.seasonal_mode_step )
                     if( str2double(datestr(date, 'mm')) > 9)
-                        obj.K(i, obj.num_hysteresis_days+offset+1) = 1;
+                        obj.K(i, obj.num_history_days+offset+1) = 1;
                     else
-                        obj.K(i, obj.num_hysteresis_days+offset+1) = 0;
+                        obj.K(i, obj.num_history_days+offset+1) = 0;
                     end
-                elseif(obj.seasonal_doc_mode == obj.seasonal_doc_mode_modeled  )
+                elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
                     haddam_fdom.day_of_year(date)
-                    obj.K(i, obj.num_hysteresis_days+offset+1) = obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;  % multiply by 10000 to avoid matrix precision problems
+                    obj.K(i, obj.num_history_days+offset+1) = obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;  % multiply by 10000 to avoid matrix precision problems
                 
-                elseif(obj.seasonal_doc_mode == obj.seasonal_doc_mode_12_month )
+                elseif(obj.seasonal_mode == obj.seasonal_mode_12_month )
                     month = str2double(datestr(date, 'mm'));
                     start_month = 1;
                     end_month = 12;
                     for m = start_month:end_month
-                        index = obj.num_hysteresis_days+offset+(m + 1 - start_month);
+                        index = obj.num_history_days+offset+(m + 1 - start_month);
                         if(m == month)
                            obj.K(i, index) = 1; 
                         else
@@ -666,7 +738,7 @@ classdef haddam_fdom < handle
                         end
                     end
                 else
-                    obj.K(i, obj.num_hysteresis_days+1) = 1;
+                    obj.K(i, obj.num_history_days+1) = 1;
                 end
             end
             
@@ -705,6 +777,7 @@ classdef haddam_fdom < handle
             % pi is precipitation total i days ago
             
             sample_count = size(timestamps);
+            sample_count
             
             % organize the precipitation for lookup
             x_map = containers.Map(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
@@ -715,8 +788,8 @@ classdef haddam_fdom < handle
             for i=1:sample_count(1)
                 date = obj.usgs_timeseries_subset_timestamps(i);
                 
-                precip_totals = zeros(obj.num_hysteresis_days, 1);
-                for j = 1:obj.num_hysteresis_days
+                precip_totals = zeros(obj.num_history_days, 1);
+                for j = 1:obj.num_history_days
                     if(j==1)
                         d = date;
                     else
@@ -736,18 +809,18 @@ classdef haddam_fdom < handle
                 end
                 
                 % add up the predictor variables
-                for j = 1:obj.num_hysteresis_days
+                for j = 1:obj.num_history_days
                     obj.predicted_values(i) = obj.predicted_values(i) + obj.a(j+offset) * precip_totals(j);
                 end
                 
-                if(obj.seasonal_doc_mode == obj.seasonal_doc_mode_step )
+                if(obj.seasonal_mode == obj.seasonal_mode_step )
                     if( str2double(datestr(date, 'mm')) > 9)
-                       obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_hysteresis_days + offset +1);
+                       obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_history_days + offset +1);
                     end
-                elseif(obj.seasonal_doc_mode == obj.seasonal_doc_mode_modeled  )
-                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_hysteresis_days + offset + 1)*obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;
+                elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
+                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_history_days + offset + 1)*obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;
                  
-                elseif(obj.seasonal_doc_mode == obj.seasonal_doc_mode_12_month )
+                elseif(obj.seasonal_mode == obj.seasonal_mode_12_month )
                     month = str2double(datestr(date, 'mm'));
                     start_month = 1;
                     end_month = 12;
@@ -778,7 +851,6 @@ classdef haddam_fdom < handle
             % only predicted based off summer and fall, month greater than
             % may, to avoid impact of snowmelt.
             sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_download_usgs '...
-                'where cdom > 0 ' ...
                 'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
                 'order by timestamp asc'], s_date, e_date);
                             % 'and month > 5 ' ...
@@ -794,11 +866,12 @@ classdef haddam_fdom < handle
             obj.y =  obj.usgs_timeseries_subset.discharge;
             obj.y(isnan(obj.y))=0;
          end
+         
+ 
         
         function predict_discharge(obj)
             % load the averaged values
             sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_download_usgs '...
-                'where cdom > 0 ' ...
                 'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
                 'order by timestamp asc'], obj.start_date, obj.end_date);
             disp(sqlquery);
@@ -812,6 +885,146 @@ classdef haddam_fdom < handle
         end
             
         
+        function build_inversion_conductance(obj)
+            s_date = obj.parameterization_start_date;
+            e_date = obj.parameterization_end_date;
+            
+            % may want to specify different parameterization date range
+            % from prediction range
+            %s_date = '2012-01-01';
+            %e_date = '2012-02-01';
+            
+            % load the averaged values
+            % only predicted based off summer and fall, month greater than
+            % may, to avoid impact of snowmelt.
+            sqlquery = sprintf(['select timestamp,conductance_mean as conductance from haddam_download_usgs '...
+                'where conductance_mean > 0 ' ...
+                'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], s_date, e_date);
+                            % 'and month > 5 ' ...
+
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_timeseries_subset = curs.Data;
+            obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
+            
+            disp('Building Predictor Matrix');
+            obj.build_predictor_matrix(obj.usgs_timeseries_subset_timestamps);
+            disp('Built Predictor Matrix');
+            obj.y =  obj.usgs_timeseries_subset.conductance;
+            obj.y(isnan(obj.y))=0;
+        end
+        
+        function predict_conductance(obj)
+            % this is just getting the timestamps
+            sqlquery = sprintf(['select timestamp,conductance_mean as conductance from haddam_download_usgs '...
+                'where conductance_mean > 0 ' ...
+                'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], obj.start_date, obj.end_date);
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_timeseries_subset = curs.Data;
+            obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
+            
+            obj.predict(obj.usgs_timeseries_subset_timestamps);
+        end
+        
+       function inverse_model_cdom(obj)
+           obj.seasonal_mode = obj.seasonal_mode_12_month;
+           obj.build_inversion('cdom');
+           obj.solve_inverse
+           obj.predict(obj.usgs_timeseries_subset_timestamps);
+           obj.plot_prediction(  obj.usgs_timeseries_subset.value );
+       end
+        
+          
+       function inverse_model_conductance(obj)
+           obj.seasonal_mode = obj.seasonal_mode_12_month;
+           obj.build_inversion('conductance_mean');
+           obj.solve_inverse
+           obj.predict(obj.usgs_timeseries_subset_timestamps);
+           obj.plot_prediction(  obj.usgs_timeseries_subset.value );
+        end
+        
+       function inverse_model_turbidity(obj)
+           obj.seasonal_mode = obj.seasonal_mode_12_month;
+           obj.build_inversion('turbidity');
+           obj.solve_inverse
+           obj.predict(obj.usgs_timeseries_subset_timestamps);
+           obj.plot_prediction(  obj.usgs_timeseries_subset.value );
+       end
+       
+       function inverse_model_nitrate(obj)
+           obj.seasonal_mode = obj.seasonal_mode_12_month;
+           obj.build_inversion('nitrate');
+           obj.solve_inverse
+           obj.predict(obj.usgs_timeseries_subset_timestamps);
+           obj.plot_prediction(  obj.usgs_timeseries_subset.value );
+       end
+       
+        function inverse_model_do(obj)
+           obj.seasonal_mode = obj.seasonal_mode_12_month;
+           obj.build_inversion('doxygen');
+           obj.solve_inverse
+           obj.predict(obj.usgs_timeseries_subset_timestamps);
+           obj.plot_prediction(  obj.usgs_timeseries_subset.value );
+       end
+        
+        
+       function build_inversion(obj, field)
+            s_date = obj.parameterization_start_date;
+            e_date = obj.parameterization_end_date;
+            
+            % may want to specify different parameterization date range
+            % from prediction range
+            %s_date = '2012-01-01';
+            %e_date = '2012-02-01';
+            
+            % load the averaged values
+            % only predicted based off summer and fall, month greater than
+            % may, to avoid impact of snowmelt.
+            sqlquery = sprintf(['select timestamp, %s as value from haddam_download_usgs '...
+                'where timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], field, s_date, e_date);
+                            % 'and month > 5 ' ...
+                            %                 'and value > 0 ' ...
+
+
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_timeseries_subset = curs.Data;
+            obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
+            
+            disp('Building Predictor Matrix');
+            obj.build_predictor_matrix(obj.usgs_timeseries_subset_timestamps);
+            disp('Built Predictor Matrix');
+            obj.y =  obj.usgs_timeseries_subset.value;
+            obj.y(isnan(obj.y))=0;
+        end 
+       
+        function predict_field(obj, field)
+            % this is just getting the timestamps
+            sqlquery = sprintf(['select timestamp,%s as value from haddam_download_usgs '...
+                'where timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], field, obj.start_date, obj.end_date);
+            
+            %                 'where value > 0 ' ...
+
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_timeseries_subset = curs.Data;
+            obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
+            
+            obj.predict(obj.usgs_timeseries_subset_timestamps);
+        end
         
         function plot_month_coeffs(obj)
            figure;
@@ -833,6 +1046,7 @@ classdef haddam_fdom < handle
         function plot_prediction(obj, observed)
             figure();
             max_observed = max(observed);
+            %max_observed = 100;
             
             subplot(4,1,1);
             plot(obj.usgs_timeseries_subset_timestamps, observed);
@@ -898,12 +1112,12 @@ classdef haddam_fdom < handle
         end
         
         
-        function plot_hysteresis_effect(obj)
+        function plot_history_effect(obj)
             A = obj.a(:,1);
-            A = A(2:end-1);
+            A = A(1:obj.num_history_days);
             figure;
             hold on;
-            plot(0:obj.num_hysteresis_days-1, A(:,1));
+            plot(0:obj.num_history_days-1, A(:,1));
             title('Coefficients of precipitation influence by number of days in the past');
             
             hline = refline([0 0]);
@@ -942,7 +1156,7 @@ classdef haddam_fdom < handle
             sample_count = size(obj.usgs_timeseries_subset_timestamps);
             sample_count = sample_count(1);
             %sample_count = 10;
-            obj.K = zeros(sample_count, obj.num_hysteresis_days * 6 + 2); % * 6 for metabasins
+            obj.K = zeros(sample_count, obj.num_history_days * 6 + 2); % * 6 for metabasins
             obj.y = zeros(sample_count, 1);
             
             % organize the precipitation for lookup
@@ -971,8 +1185,8 @@ classdef haddam_fdom < handle
             for i=1:sample_count
                 date = obj.usgs_timeseries_subset_timestamps(i);
                 
-                precip_totals = zeros(obj.num_hysteresis_days, 6);
-                for j = 1:obj.num_hysteresis_days
+                precip_totals = zeros(obj.num_history_days, 6);
+                for j = 1:obj.num_history_days
                     d = datenum(date - days(j-1));
                     for k = 1 : basins
                         precip_totals(j, k) = 0;
@@ -986,7 +1200,7 @@ classdef haddam_fdom < handle
                 
                 obj.K(i, 1) = 1;
                 for k = 1 : basins
-                    for j = 1:obj.num_hysteresis_days
+                    for j = 1:obj.num_history_days
                         % assign X values for inverse model
                         % some basin and day totals are set to zero 
                         % because we know they could not have any effect.
@@ -995,33 +1209,33 @@ classdef haddam_fdom < handle
                         % need to actually change the forward problem
                         %basin = k;
                         %if j == 1 && (basin == 1 || basin == 2 || basin == 3 || basin == 4)
-                        %     obj.K(i, ((k-1)*obj.num_hysteresis_days) + j +1) = 0;
+                        %     obj.K(i, ((k-1)*obj.num_history_days) + j +1) = 0;
                         %elseif j == 2 && (basin == 1 || basin == 2)
-                        %       obj.K(i, ((k-1)*obj.num_hysteresis_days) + j +1) = 0;
+                        %       obj.K(i, ((k-1)*obj.num_history_days) + j +1) = 0;
                         %else
-                            obj.K(i, ((k-1)*obj.num_hysteresis_days) + j +1) = precip_totals(j, k);
+                            obj.K(i, ((k-1)*obj.num_history_days) + j +1) = precip_totals(j, k);
                         %end
                     end
                 end
                 
                 d = str2double(datestr(date, 'dd'));
                     
-                if(obj.seasonal_doc_mode == obj.seasonal_doc_mode_step )
+                if(obj.seasonal_mode == obj.seasonal_mode_step )
                     if( str2double(datestr(date, 'mm')) > 9)
-                        obj.K(i, basins*obj.num_hysteresis_days+offset+1) = 1;
+                        obj.K(i, basins*obj.num_history_days+offset+1) = 1;
                     else
-                        obj.K(i, basins*obj.num_hysteresis_days+offset+1) = 0;
+                        obj.K(i, basins*obj.num_history_days+offset+1) = 0;
                     end
-                elseif(obj.seasonal_doc_mode == obj.seasonal_doc_mode_modeled  )
+                elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
                     haddam_fdom.day_of_year(date)
-                    obj.K(i, basins*obj.num_hysteresis_days+offset+1) = obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;  % multiply by 10000 to avoid matrix precision problems
+                    obj.K(i, basins*obj.num_history_days+offset+1) = obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;  % multiply by 10000 to avoid matrix precision problems
                     
-                elseif(obj.seasonal_doc_mode == obj.seasonal_doc_mode_12_month )
+                elseif(obj.seasonal_mode == obj.seasonal_mode_12_month )
                     month = str2double(datestr(date, 'mm'));
                     start_month = 1;
                     end_month = 12;
                     for m = start_month:end_month
-                        index = basins*obj.num_hysteresis_days+offset+(m + 1 - start_month);
+                        index = basins*obj.num_history_days+offset+(m + 1 - start_month);
                         if(m == month)
                             obj.K(i, index) = 1;
                         else
@@ -1087,8 +1301,8 @@ classdef haddam_fdom < handle
                 
                 for k = 1:basins
                     
-                    precip_totals = zeros(obj.num_hysteresis_days, 1);
-                    for j = 1:obj.num_hysteresis_days
+                    precip_totals = zeros(obj.num_history_days, 1);
+                    for j = 1:obj.num_history_days
                         d = datenum(date - days(j));
                         precip_totals(j) = 0;
                         
@@ -1100,20 +1314,20 @@ classdef haddam_fdom < handle
                     end
                     
                     % add up the predictor variables
-                    for j = 1:obj.num_hysteresis_days
-                        obj.predicted_values(i) = obj.predicted_values(i) + obj.a((k-1)*obj.num_hysteresis_days +  j + 1) * precip_totals(j);
+                    for j = 1:obj.num_history_days
+                        obj.predicted_values(i) = obj.predicted_values(i) + obj.a((k-1)*obj.num_history_days +  j + 1) * precip_totals(j);
                     end
                     
                 end
                 
-                if(obj.seasonal_doc_mode == obj.seasonal_doc_mode_step )
+                if(obj.seasonal_mode == obj.seasonal_mode_step )
                     if( str2double(datestr(date, 'mm')) > 9)
-                       obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_hysteresis_days + offset +1);
+                       obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_history_days + offset +1);
                     end
-                elseif(obj.seasonal_doc_mode == obj.seasonal_doc_mode_modeled  )
-                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_hysteresis_days + offset + 1)*obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;
+                elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
+                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_history_days + offset + 1)*obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;
                  
-                elseif(obj.seasonal_doc_mode == obj.seasonal_doc_mode_12_month )
+                elseif(obj.seasonal_mode == obj.seasonal_mode_12_month )
                     month = str2double(datestr(date, 'mm'));
                     start_month = 1;
                     end_month = 12;
@@ -1136,7 +1350,7 @@ classdef haddam_fdom < handle
             obj.plot_prediction_yy;
         end
         
-        function plot_hysteresis_effect_metabasins(obj)
+        function plot_history_effect_metabasins(obj)
             
             A = obj.a(:,1);
             A = A(2:end-1);
@@ -1149,10 +1363,10 @@ classdef haddam_fdom < handle
                 
                 legends = [obj.metabasin_precipitation_totals.name(index), obj.metabasin_precipitation_totals.name(index+1)];
                 
-                Ak = A((index-1)*obj.num_hysteresis_days+1 : index*obj.num_hysteresis_days);
+                Ak = A((index-1)*obj.num_history_days+1 : index*obj.num_history_days);
                 plot(Ak);
                 index2 = index + 1;
-                Ak = A((index2-1)*obj.num_hysteresis_days+1 : index2*obj.num_hysteresis_days);
+                Ak = A((index2-1)*obj.num_history_days+1 : index2*obj.num_history_days);
                 plot(Ak);
                 title('Coefficients of precipitation influence by number of days in the past');
                 legend(legends, 'Location', 'southwest');
@@ -1207,8 +1421,8 @@ classdef haddam_fdom < handle
                 
                 
                 
-                precip_totals = zeros(obj.num_hysteresis_days, 1);
-                for j = 1:obj.num_hysteresis_days
+                precip_totals = zeros(obj.num_history_days, 1);
+                for j = 1:obj.num_history_days
                     d = datenum(date - days(j));
                     precip_totals(j) = 0;
                     
@@ -1219,13 +1433,13 @@ classdef haddam_fdom < handle
                 end
                 
                 % add up the predictor variables
-                for j = 1:obj.num_hysteresis_days
-                    obj.predicted_values(i) = obj.predicted_values(i) + obj.a((basin-1) * obj.num_hysteresis_days +  j + 1) * precip_totals(j);
+                for j = 1:obj.num_history_days
+                    obj.predicted_values(i) = obj.predicted_values(i) + obj.a((basin-1) * obj.num_history_days +  j + 1) * precip_totals(j);
                 end
                 
                 
                 if( str2double(datestr(date, 'mm')) > 9)
-                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a((basin-1) * obj.num_hysteresis_days + 2);
+                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a((basin-1) * obj.num_history_days + 2);
                 end
             end
         end
@@ -1243,7 +1457,22 @@ classdef haddam_fdom < handle
             hold off;
         end
         
-        
+        function precipitation_running_average(obj)
+           precipitation_running_avg = zeros(length(obj.precipitation_timestamps),1);
+           len = length(precipitation_running_avg);
+           window = 90;
+           half_window = floor(window/2);
+           for i = half_window+1:len-half_window-1
+              sum = 0;
+              for j = 1:window
+                 sum = sum + obj.precipitation_data.total_precipitation(i - half_window + j);
+              end
+              precipitation_running_avg(i) = sum;
+           end
+           figure;
+           plot(obj.precipitation_timestamps, precipitation_running_avg);
+           datetick('x');
+        end
     end
     
 end
