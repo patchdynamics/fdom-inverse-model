@@ -58,6 +58,7 @@ for i = 1:6
 end
 
 
+% hysteresis
 xmin = 1;
 xmax = 10000;
 x = hf.usgs_timeseries_filtered_discharge(xmin:xmax);
