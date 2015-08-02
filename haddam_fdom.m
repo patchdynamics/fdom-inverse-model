@@ -23,6 +23,9 @@ classdef haddam_fdom < handle
         precipitation_data;
         precipitation_timestamps;
         
+        usgs_daily_means;
+        usgs_daily_means_timestampes;
+        
         seasonal_doc_julian;
         
         start_date = '2012-01-01';
@@ -45,6 +48,9 @@ classdef haddam_fdom < handle
         y;
         a;
         predicted_values;
+        
+        predictions;
+        
     end
     
     methods(Static)
@@ -163,6 +169,21 @@ classdef haddam_fdom < handle
             obj.usgs_timeseries = curs.Data;
             obj.usgs_timeseries_timestamps = datenum(obj.usgs_timeseries.timestamp);
             
+        end
+        
+        function load_usgs_daily_means(obj)
+         sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_download_usgs '...
+                'where cdom > 0 ' ...
+                'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], obj.start_date, obj.end_date);
+                            % 'and month > 5 ' ...
+
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_daily_means = curs.Data;
+            obj.usgs_daily_means_timestampes = datenum(obj.usgs_daily_means.timestamp);
         end
         
         function load_fdom_corrected(obj)
@@ -475,11 +496,17 @@ classdef haddam_fdom < handle
             datetick('x');
         end
         
-        function find_precipitation_events(obj)
+        function find_precipitation_events(obj, opt1, opt2)
+            if(nargin > 1)
+                event_start_threshold = opt1;
+                event_end_threshold = opt2;
+            else
+                event_start_threshold = 900;
+                event_end_threshold = 900;
+            end
             
             % process for events
             in_event = false;
-            event_threshold = 900;
             event_start_date = 0;
             event_end_date = 0;
             event_total_size = 0;
@@ -492,15 +519,15 @@ classdef haddam_fdom < handle
                 precipitation = obj.precipitation_data.total_precipitation(i);
                 
                 if in_event == false
-                    if precipitation > event_threshold
+                    if precipitation > event_start_threshold
                         in_event = true;
                         event_start_date = obj.precipitation_timestamps(i);
                         event_total_size = precipitation;
                     end
                 else
-                    if precipitation > event_threshold
+                    if precipitation > event_end_threshold
                         event_total_size = event_total_size + precipitation
-                    else precipitation < event_threshold
+                    else precipitation < event_end_threshold
                         in_event = false;
                         event_end_date = obj.precipitation_timestamps(i);
                         % event is over, put it into the arrays
@@ -527,17 +554,23 @@ classdef haddam_fdom < handle
             
         end
         
+        function plot_event_lenghts(obj)
+            figure; plot(hf.event_start_dates, event_lengths, 'o'); ylim([0 5])
+        end
+        
         function plot_events_and_cdom(obj)
             % events and FDOM
             figure;
             [hax, hLine1, hLine2] = plotyy(obj.usgs_timeseries_timestamps, obj.usgs_timeseries.cdom, obj.event_start_dates, obj.event_total_sizes, 'plot', 'stem');
             %set(hLine1,'color','red');
             %set(hLine2,'color','blue');
-            datetick(hax(1));
-            datetick(hax(2));
+            datetick(hax(1), 'keeplimits');
+            datetick(hax(2), 'keeplimits');
             set(hax(1),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
             set(hax(2),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
             title('Precipitation Events and FDOM');
+            labels = cellstr( num2str([1:length(obj.event_start_dates)]') ); 
+            text(obj.event_start_dates, obj.event_total_sizes, labels, 'parent', hax(2)); %,
         end
         
         function plot_events_and_discharge(obj)
@@ -551,16 +584,13 @@ classdef haddam_fdom < handle
             %set(hLine2,'color','blue');
             datetick(hax(1), 'keeplimits');
             datetick(hax(2), 'keeplimits');
+            labels = cellstr( num2str([1:length(obj.event_start_dates)]') ); 
+            text(obj.event_start_dates, obj.event_total_sizes, labels, 'parent', hax(2)); %, ...
+                                             %'HorizontalAlignment','right');
+
+                             %'VerticalAlignment','bottom', ...
             
-            f=figure;
-            set(gca,'Position',[.05 .05 .9 .9]);
-            plotedit on;
-            set(f, 'Position', [0 0 1600 300]);
-            subplot(2,1,1);            
-            plot(obj.usgs_timeseries_timestamps, obj.usgs_timeseries_filtered_discharge);
-            subplot(2,1,2);
-            stem(obj.event_start_dates, obj.event_total_sizes);
-            title('Precipitation Events');
+          
         end
         
         
@@ -1346,7 +1376,7 @@ classdef haddam_fdom < handle
             obj.build_predictor_matrix_metabasins;
             obj.solve_inverse;
             obj.predict_fdom_metabasins;
-            obj.plot_prediction;
+            obj.plot_prediction( obj.usgs_timeseries_subset.cdom )
             obj.plot_prediction_yy;
         end
         
@@ -1379,12 +1409,16 @@ classdef haddam_fdom < handle
       
         end
         
-        function predict_fdom_metabasins_single(obj, basin)
+        %
+        % basin is index in original metabasin query
+        % index is index in subgroup of metabasins used in current inversion
+        %
+        function predict_fdom_metabasins_single(obj, basin, index, num)
             syms fdom p3 p4 p5;
             obj.a
             
             % load the averaged values
-            sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_download_usgs '...
+            sqlquery = sprintf(['select timestamp,cdom from haddam_download_usgs '...
                 'where cdom > 0 ' ...
                 'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
                 'order by timestamp asc'], obj.start_date, obj.end_date);
@@ -1419,8 +1453,6 @@ classdef haddam_fdom < handle
             for i=1:sample_count(1)
                 date = obj.usgs_timeseries_subset_timestamps(i);
                 
-                
-                
                 precip_totals = zeros(obj.num_history_days, 1);
                 for j = 1:obj.num_history_days
                     d = datenum(date - days(j));
@@ -1434,13 +1466,29 @@ classdef haddam_fdom < handle
                 
                 % add up the predictor variables
                 for j = 1:obj.num_history_days
-                    obj.predicted_values(i) = obj.predicted_values(i) + obj.a((basin-1) * obj.num_history_days +  j + 1) * precip_totals(j);
+                    obj.predicted_values(i) = obj.predicted_values(i) + obj.a((index-1) * obj.num_history_days +  j ) * precip_totals(j);
                 end
                 
                 
-                if( str2double(datestr(date, 'mm')) > 9)
-                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a((basin-1) * obj.num_history_days + 2);
+                if(obj.seasonal_mode == obj.seasonal_mode_step )
+                    if( str2double(datestr(date, 'mm')) > 9)
+                       obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_history_days + 1);
+                    end
+                elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
+                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_history_days + 1)*obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;
+                 
+                elseif(obj.seasonal_mode == obj.seasonal_mode_12_month )
+                    month = str2double(datestr(date, 'mm'));
+                    start_month = 1;
+                    end_month = 12;
+                    for m = start_month:end_month
+                        mindex = 2 * obj.num_history_days + (m + 1 - start_month);
+                        if(m == month)
+                           obj.predicted_values(i) = obj.predicted_values(i) + obj.a(mindex) / num;
+                        end
+                    end
                 end
+                                
             end
         end
         
@@ -1473,6 +1521,304 @@ classdef haddam_fdom < handle
            plot(obj.precipitation_timestamps, precipitation_running_avg);
            datetick('x');
         end
+        
+        function build_predictor_matrix_a_b(obj, basins)
+            
+            % load the averaged values
+            % only predicted based off summer and fall, month greater than
+            % may, to avoid impact of snowmelt.
+            sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_download_usgs '...
+                'where cdom > 0 ' ...
+                'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], obj.parameterization_start_date, obj.parameterization_end_date);
+            
+            %                 'and month > 5 ' ...  % skipping spring was
+            %                 creating singular matrix
+
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_timeseries_subset = curs.Data;
+            obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
+            
+            % y = a3 * p3 + a4 * p4 + a5 * p5 + c
+            % pi is precipitation total i days ago
+            
+            sample_count = size(obj.usgs_timeseries_subset_timestamps);
+            sample_count = sample_count(1);
+            %sample_count = 10;
+            obj.K = zeros(sample_count, obj.num_history_days * 2); 
+            obj.y = zeros(sample_count, 1);
+
+                        
+            % organize the precipitation for lookup
+            
+            x_maps = java.util.Vector(2);
+            %x_maps;
+            for k = 1 : 2
+                b = basins(k);
+                totals = obj.metabasin_precipitation_totals.sums{b}.getArray;
+                totals = double(totals);
+                dates = obj.metabasin_precipitation_totals.timestamps{b}.getArray;
+                dates = char(dates);
+                timestamps = datenum(dates,'yyyymmdd');
+                map = java.util.Hashtable;
+                size(totals, 1)
+                for i = 1:size(totals, 1)
+                    map.put(timestamps(i), totals(i));
+                end
+                %map
+                
+                x_maps.add(map);
+                
+            end
+            
+            
+            for i=1:sample_count
+                date = obj.usgs_timeseries_subset_timestamps(i);
+                
+                precip_totals = zeros(obj.num_history_days, 2);
+                for j = 1:obj.num_history_days
+                    d = datenum(date - days(j-1));
+                    for k = 1 : 2
+                        precip_totals(j, k) = 0;
+                        x_map = x_maps.get(k-1);
+                        if x_map.containsKey(d)
+                            precip_totals(j, k) = x_map.get(d);
+                        end
+                    end
+                end
+                
+                
+                for k = 1 : 2
+                    for j = 1:obj.num_history_days
+                        % assign X values for inverse model
+                        % some basin and day totals are set to zero 
+                        % because we know they could not have any effect.
+                        
+                        % doing this leads to a singular matrix
+                        % need to actually change the forward problem
+                        %basin = k;
+                        %if j == 1 && (basin == 1 || basin == 2 || basin == 3 || basin == 4)
+                        %     obj.K(i, ((k-1)*obj.num_history_days) + j +1) = 0;
+                        %elseif j == 2 && (basin == 1 || basin == 2)
+                        %       obj.K(i, ((k-1)*obj.num_history_days) + j +1) = 0;
+                        %else
+                            obj.K(i, ((k-1)*obj.num_history_days) + j) = precip_totals(j, k);
+                        %end
+                        
+                       
+                    end
+                end
+                
+                d = str2double(datestr(date, 'dd'));
+                
+                    
+                if(obj.seasonal_mode == obj.seasonal_mode_step )
+                    if( str2double(datestr(date, 'mm')) > 9)
+                        obj.K(i, 2*obj.num_history_days+1) = 1;
+                    else
+                        obj.K(i, 2*obj.num_history_days+1) = 0;
+                    end
+                elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
+                    haddam_fdom.day_of_year(date)
+                    obj.K(i, 2*obj.num_history_days+1) = obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;  % multiply by 10000 to avoid matrix precision problems
+                    
+                elseif(obj.seasonal_mode == obj.seasonal_mode_12_month )
+                    month = str2double(datestr(date, 'mm'));
+                    start_month = 1;
+                    end_month = 12;
+                    for m = start_month:end_month
+                        index = 2*obj.num_history_days+(m + 1 - start_month);
+                     
+                        if(m == month)
+                            obj.K(i, index) = 1;
+                        else
+                            obj.K(i, index) = 0;
+                        end
+                    end
+                end
+                
+                obj.y(i) = obj.usgs_timeseries_subset.cdom(i);
+            end
+            
+            %obj.K
+            
+        end
+        
+        function predict_fdom_metabasins_a_b(obj, basins)
+            syms fdom p3 p4 p5;
+            obj.a
+            
+            % load the averaged values
+            sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_download_usgs '...
+                'where cdom > 0 ' ...
+                'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'order by timestamp asc'], obj.start_date, obj.end_date);
+            disp(sqlquery);
+            curs = exec(obj.conn,sqlquery);
+            setdbprefs('DataReturnFormat','structure');
+            curs = fetch(curs);
+            obj.usgs_timeseries_subset = curs.Data;
+            obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
+            
+            % y = a3 * p3 + a4 * p4 + a5 * p5 + c
+            % pi is precipitation total i days ago
+            
+            sample_count = size(obj.usgs_timeseries_subset_timestamps);
+            
+            % organize the precipitation for lookup
+            x_maps = java.util.Vector(2);
+            for k = 1 : 2
+                b = basins(k);
+                totals = obj.metabasin_precipitation_totals.sums{b}.getArray;
+                totals = double(totals);
+                dates = obj.metabasin_precipitation_totals.timestamps{b}.getArray;
+                dates = char(dates);
+                timestamps = datenum(dates,'yyyymmdd');
+                map = java.util.Hashtable;
+                size(totals, 1)
+                for i = 1:size(totals, 1)
+                    map.put(timestamps(i), totals(i));
+                end
+                
+                x_maps.add(map);
+                
+            end
+            
+            
+            obj.predicted_values = zeros(sample_count);
+            
+            for i=1:sample_count(1)
+                date = obj.usgs_timeseries_subset_timestamps(i);
+                
+                obj.predicted_values(i) = obj.a(1);
+                
+                
+                % this all needs to be switched to matrix notation
+                for k = 1:2
+                    
+                    precip_totals = zeros(obj.num_history_days, 1);
+                    for j = 1:obj.num_history_days
+                        d = datenum(date - days(j));                        
+                        x_map = x_maps.get(k-1);
+                        if x_map.containsKey(d)
+                            precip_totals(j) = x_map.get(d);
+                        end
+                        
+                    end
+                    
+                    % add up the predictor variables
+                    for j = 1:obj.num_history_days
+                        obj.predicted_values(i) = obj.predicted_values(i) + obj.a((k-1)*obj.num_history_days +  j + 1) * precip_totals(j);
+                    end
+                    
+                end
+                                
+                if(obj.seasonal_mode == obj.seasonal_mode_step )
+                    if( str2double(datestr(date, 'mm')) > 9)
+                       obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_history_days + 1);
+                    end
+                elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
+                    obj.predicted_values(i) = obj.predicted_values(i) +  obj.a(obj.num_history_days + 1)*obj.seasonal_doc_julian(haddam_fdom.day_of_year(date),2)*10000;
+                 
+                elseif(obj.seasonal_mode == obj.seasonal_mode_12_month )
+                    month = str2double(datestr(date, 'mm'));
+                    start_month = 1;
+                    end_month = 12;
+                    for m = start_month:end_month
+                        index = 2 * obj.num_history_days + (m + 1 - start_month);
+                        if(m == month)
+                           obj.predicted_values(i) = obj.predicted_values(i) + obj.a(index);
+                        end
+                    end
+                end
+                
+            end
+        end
+        
+       
+        function plot_history_effect_metabasins_a_b(obj, basins)
+            
+            A = obj.a
+            figure;
+                            
+            hold on;
+            
+
+            for index = 1:2
+                
+                Ak = A((index-1)*obj.num_history_days+1 : index*obj.num_history_days);
+                plot(Ak);
+                Ak
+% ??                index2 = index + 1;
+%               Ak = A((index2-1)*obj.num_history_days+1 : index2*obj.num_history_days);
+%           plot(Ak);
+                title('Coefficients of precipitation influence by number of days in the past');
+                ylim([-0.05,0.05]);
+                
+            end
+            hline = refline([0 0]);
+            hline.Color = 'r';
+            
+            legends = [obj.metabasin_precipitation_totals.name(basins(1)), obj.metabasin_precipitation_totals.name(basins(2)), 'Zero'];
+            legend(legends, 'Location', 'southwest');
+                            
+            hold off;
+
+            
+
+      
+        end
+        
+        function inverse_model_metabasins_a_b(obj)
+            basins = [3 5];
+            obj.build_predictor_matrix_a_b(basins);
+            obj.solve_inverse;
+            obj.predict_fdom_metabasins_a_b(basins);
+            %obj.plot_prediction( obj.usgs_timeseries_subset.cdom )
+            
+            figure;
+            hold on;
+            plot(obj.usgs_timeseries_subset_timestamps, obj.usgs_timeseries_subset.cdom );
+            plot(obj.usgs_timeseries_subset_timestamps, obj.predicted_values);
+            datetick('x');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            
+            %obj.plot_prediction_yy;
+            
+            hf.plot_history_effect_metabasins_a_b(basins)
+        end
+        
+        function single_basin_compare_a_b(obj, basins)
+            
+            obj.predictions = zeros(length(obj.usgs_timeseries_subset_timestamps), 1);
+            
+            
+            figure;
+            %hold on;
+            subplot(3,1,1);
+            plot(obj.usgs_timeseries_subset_timestamps, obj.usgs_timeseries_subset.cdom);
+            title('sensor');
+
+            for i=1:2
+                basins(i)
+                obj.predict_fdom_metabasins_single(basins(i), i, 2);
+                obj.predictions(:,i) = obj.predicted_values
+                subplot(3,1,i+1);
+                plot(obj.usgs_timeseries_subset_timestamps, obj.predicted_values);
+                
+                title('basin');
+            end
+            %hold off;
+            
+            %figure;  plotyy(obj.usgs_timeseries_subset_timestamps, obj.usgs_timeseries_subset.cdom, obj.usgs_timeseries_subset_timestamps, obj.predictions(:,1) + obj.predictions(:,2));
+
+            %figure;  hold on; plot(obj.usgs_timeseries_subset_timestamps, obj.usgs_timeseries_subset.cdom, obj.usgs_timeseries_subset_timestamps, obj.usgs_timeseries_subset.cdom - obj.predictions(:,2));
+
+        end
+        
     end
     
 end

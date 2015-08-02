@@ -105,6 +105,7 @@ y = hf.usgs_timeseries.discharge;
 tf = isnan(y);
 ix = 1:numel(y);
 y(tf) = interp1(ix(~tf),y(~tf),ix(tf));
+discharge = y;
 
 Y = fft(y(1:L));
 Yp = Y;  Yp(1) = 0;
@@ -162,4 +163,92 @@ figure; Lp = 300; plot(.25*(1:Lp), magYp(1:Lp), '*');
 
 figure; plotyy( F, y(1:L), (1:L) * .25, dataOut(1:L)); legend('original', 'filtered');
 
+
+
+L = 89569 - 169;  % for tidal f is fourier freq
+%L = 89569 - 20;
+y = hf.usgs_timeseries.conductance(1:L);
+
+tf = isnan(y);
+ix = 1:numel(y);
+y(tf) = interp1(ix(~tf),y(~tf),ix(tf));
+
+Y = fft(y);
+Yp = Y;  Yp(1) = 0;
+magYp = abs(Yp);
+
+figure; Lp = L/2; plot(F(min:Lp), magYp(min:Lp), '*');
+xlim([0 0.2]);
+
+figure; Lp = L/2; plot((min:Lp), magYp(min:Lp), '*');
+xlim([0 5000]);
+
+
+% cross correllation
+[XCF,lags,bounds] = crosscorr(discharge, hf.usgs_timeseries.cdom,400)
+figure; plot(lags, XCF, '*')
+
+
+min = 1; max = 40000; figure; plotyy((min:max), discharge(min:max), (min:max), hf.usgs_timeseries.cdom(min:max));
+
+% this one is close
+min = 25000; max = 26400; figure; plotyy((min:max), hf.usgs_timeseries_filtered_discharge(min:max), (min:max), hf.usgs_timeseries.cdom(min:max));
+
+% this is the norm, much more delayed
+min = 14000; max = 17000; figure; plotyy((min:max), hf.usgs_timeseries_filtered_discharge(min:max), (min:max), hf.usgs_timeseries.cdom(min:max));
+
+
+[XCF,lags,bounds] = crosscorr(hf.usgs_timeseries_filtered_discharge(min:max), hf.usgs_timeseries.cdom(min:max),800)
+
+[XCF,lags,bounds] = crosscorr(discharge(min:max), hf.usgs_timeseries.cdom(min:max),800)
+figure; plot(lags/4/24, XCF, '*')
+
+
+
+modulated = cos(2 * pi * signal4);
+figure; plot(modulated(1:100));
+
+modulated = cos(2 * pi * signal4);
+hplayer = audioplayer(modulated, Fs/5);
+play(hplayer)
+audiowrite('fdom-at-haddam-fm.wav', modulated, Fs/5)
+figure;  plot(modulated(1:300), '-m')
+
+modulated = cos(2 * pi * signal);
+hplayer = audioplayer(modulated, Fs/5);
+play(hplayer)
+
+davg = abs(tsmovavg(discharge,'s',48,1));
+figure; plot(log(davg))
+
+dmeaned = davg - mean(discharge);
+
+sig =  log10(abs(log10(davg)));
+figure; plot(sig)
+modulated = cos(2 * pi * sig);
+figure; plot(modulated(1:600))
+
+m = cos(2 * pi * (sqrt(sig) + 50000));  % something wrong with yonder f
+p = audioplayer(m, Fs/5);
+play(p)
+
+audiowrite('discharge-at-haddam-fm.wav', modulated, Fs/5)
+
+mod_fdom = cos(2 * pi * (signal4 * 2) );
+mod_discharge = cos(2 * pi * (sig / 5) );
+combined = mod_fdom + mod_discharge;
+p = audioplayer(combined, Fs/8);
+play(p)
+
+p = audioplayer(cos(2 * pi * 440 / (1:4000) ), Fs);  % pure freq?
+play(p)
+
+
+J = 500;
+figure; plotyy((1:J), mod_fdom(1:J), (1:J), mod_discharge(1:J))
+
+figure; plotyy((1:J), combined(1:J), (1:J), mod_discharge(1:J))
+
+p = audioplayer(combined, Fs/5);
+play(p)
 
