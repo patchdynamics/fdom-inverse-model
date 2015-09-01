@@ -23,6 +23,7 @@ classdef haddam_fdom < handle
         fdom_corrected_timestamps;
         precipitation_data;
         precipitation_timestamps;
+        precipitation_map;
         
         usgs_daily_means;
         usgs_daily_means_timestampes;
@@ -463,6 +464,9 @@ classdef haddam_fdom < handle
             curs = fetch(curs);
             obj.precipitation_data = curs.Data;
             obj.precipitation_timestamps = datenum(obj.precipitation_data.timestamp)
+               % organize the precipitation for lookup
+            obj.precipitation_map = containers.Map(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
+          
         end
         
         function plot_precipitation(obj)
@@ -770,11 +774,6 @@ classdef haddam_fdom < handle
             %sample_count = 10;
             obj.K = zeros(sample_count, obj.num_history_days + 1);  % should size based off seasonal mode
             
-            % organize the precipitation for lookup
-            x_map = containers.Map(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
-            
-        
-            
             for i=1:sample_count
                 date = obj.usgs_timeseries_subset_timestamps(i);
                 
@@ -783,11 +782,11 @@ classdef haddam_fdom < handle
                     if(j == 1)
                         d = date;  % start with the current day
                     else
-                        d = datenum(date - days(j-1));
+                        d = date - (j-1);
                     end
                     precip_totals(j) = 0;
-                    if isKey(x_map, d)
-                        precip_totals(j) = x_map(d);
+                    if isKey(obj.precipitation_map, d)
+                        precip_totals(j) = obj.precipitation_map(d);
                     end
                 end
                 
@@ -796,6 +795,7 @@ classdef haddam_fdom < handle
                     offset = offset + 1;
                     obj.K(i, 1) = 1;  % so an idea is to change the forward problem to remove y offset
                 end
+                offset
                 
                 if(obj.enable_snow)
                    offset = offset + 1;
@@ -803,9 +803,10 @@ classdef haddam_fdom < handle
                        obj.K(i, offset) = obj.snow_map(date);
                    end
                 end
+                offset
                 
-                for j = offset+1:obj.num_history_days+offset
-                    obj.K(i, j) = precip_totals(j-offset);
+                for j = 1:obj.num_history_days
+                    obj.K(i, j+offset) = precip_totals(j);
                 end
                 
                 d = str2double(datestr(date, 'dd'));
@@ -882,9 +883,7 @@ classdef haddam_fdom < handle
             sample_count = size(timestamps);
             sample_count
             
-            % organize the precipitation for lookup
-            x_map = containers.Map(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
-            
+           
             
             obj.predicted_values = zeros(sample_count);
             
@@ -896,11 +895,11 @@ classdef haddam_fdom < handle
                     if(j==1)
                         d = date;
                     else
-                        d = datenum(date - days(j));
+                        d = date - (j-1);
                     end
                     precip_totals(j) = 0;
-                    if isKey(x_map, d)
-                        precip_totals(j) = x_map(d);
+                    if isKey(obj.precipitation_map, d)
+                        precip_totals(j) = obj.precipitation_map(d);
                     end
                 end
                 
@@ -910,6 +909,14 @@ classdef haddam_fdom < handle
                     offset = 1;
                     obj.predicted_values(i) = obj.a(1);
                 end
+                
+                if(obj.enable_snow)
+                   offset = offset + 1;
+                   if isKey(obj.snow_map, date)
+                       obj.predicted_values(i) = obj.a(2) *  obj.snow_map(date);
+                    end
+                end
+                
                 
                 % add up the predictor variables
                 for j = 1:obj.num_history_days
@@ -1434,8 +1441,8 @@ classdef haddam_fdom < handle
             % organize the precipitation for lookup
             
             basins = 6;
-            x_maps = java.util.Vector(basins);
-            %x_maps;
+            precipitation_maps = java.util.Vector(basins);
+            %precipitation_maps;
             for k = 1 : basins
                 totals = obj.metabasin_precipitation_totals.sums{k}.getArray;
                 totals = double(totals);
@@ -1449,7 +1456,7 @@ classdef haddam_fdom < handle
                 end
                 %map
                 
-                x_maps.add(map);
+                precipitation_maps.add(map);
                 
             end
             
@@ -1462,9 +1469,9 @@ classdef haddam_fdom < handle
                     d = datenum(date - days(j-1));
                     for k = 1 : basins
                         precip_totals(j, k) = 0;
-                        x_map = x_maps.get(k-1);
-                        if x_map.containsKey(d)
-                            precip_totals(j, k) = x_map.get(d);
+                        precipitation_map = precipitation_maps.get(k-1);
+                        if precipitation_map.containsKey(d)
+                            precip_totals(j, k) = precipitation_map.get(d);
                         end
                     end
                 end
@@ -1546,7 +1553,7 @@ classdef haddam_fdom < handle
             
             % organize the precipitation for lookup
             basins = 6;
-            x_maps = java.util.Vector(basins);
+            precipitation_maps = java.util.Vector(basins);
             for k = 1 : basins
                 totals = obj.metabasin_precipitation_totals.sums{k}.getArray;
                 totals = double(totals);
@@ -1559,7 +1566,7 @@ classdef haddam_fdom < handle
                     map.put(timestamps(i), totals(i));
                 end
                 
-                x_maps.add(map);
+                precipitation_maps.add(map);
                 
             end
             
@@ -1578,9 +1585,9 @@ classdef haddam_fdom < handle
                         d = datenum(date - days(j));
                         precip_totals(j) = 0;
                         
-                        x_map = x_maps.get(k-1);
-                        if x_map.containsKey(d)
-                            precip_totals(j) = x_map.get(d);
+                        precipitation_map = precipitation_maps.get(k-1);
+                        if precipitation_map.containsKey(d)
+                            precip_totals(j) = precipitation_map.get(d);
                         end
                         
                     end
@@ -1682,7 +1689,7 @@ classdef haddam_fdom < handle
             dates = obj.metabasin_precipitation_totals.timestamps{basin}.getArray;
             dates = char(dates);
             timestamps = datenum(dates,'yyyymmdd');
-            %x_maps is a vector so this is a problem
+            %precipitation_maps is a vector so this is a problem
             map = java.util.Hashtable;
             size(totals, 1)
             for i = 1:size(totals, 1)
@@ -1796,8 +1803,8 @@ classdef haddam_fdom < handle
                         
             % organize the precipitation for lookup
             
-            x_maps = java.util.Vector(2);
-            %x_maps;
+            precipitation_maps = java.util.Vector(2);
+            %precipitation_maps;
             for k = 1 : 2
                 b = basins(k);
                 totals = obj.metabasin_precipitation_totals.sums{b}.getArray;
@@ -1812,7 +1819,7 @@ classdef haddam_fdom < handle
                 end
                 %map
                 
-                x_maps.add(map);
+                precipitation_maps.add(map);
                 
             end
             
@@ -1825,9 +1832,9 @@ classdef haddam_fdom < handle
                     d = datenum(date - days(j-1));
                     for k = 1 : 2
                         precip_totals(j, k) = 0;
-                        x_map = x_maps.get(k-1);
-                        if x_map.containsKey(d)
-                            precip_totals(j, k) = x_map.get(d);
+                        precipitation_map = precipitation_maps.get(k-1);
+                        if precipitation_map.containsKey(d)
+                            precip_totals(j, k) = precipitation_map.get(d);
                         end
                     end
                 end
@@ -1911,7 +1918,7 @@ classdef haddam_fdom < handle
             sample_count = size(obj.usgs_timeseries_subset_timestamps);
             
             % organize the precipitation for lookup
-            x_maps = java.util.Vector(2);
+            precipitation_maps = java.util.Vector(2);
             for k = 1 : 2
                 b = basins(k);
                 totals = obj.metabasin_precipitation_totals.sums{b}.getArray;
@@ -1925,7 +1932,7 @@ classdef haddam_fdom < handle
                     map.put(timestamps(i), totals(i));
                 end
                 
-                x_maps.add(map);
+                precipitation_maps.add(map);
                 
             end
             
@@ -1944,9 +1951,9 @@ classdef haddam_fdom < handle
                     precip_totals = zeros(obj.num_history_days, 1);
                     for j = 1:obj.num_history_days
                         d = datenum(date - days(j));                        
-                        x_map = x_maps.get(k-1);
-                        if x_map.containsKey(d)
-                            precip_totals(j) = x_map.get(d);
+                        precipitation_map = precipitation_maps.get(k-1);
+                        if precipitation_map.containsKey(d)
+                            precip_totals(j) = precipitation_map.get(d);
                         end
                         
                     end
