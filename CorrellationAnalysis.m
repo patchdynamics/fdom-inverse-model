@@ -43,6 +43,8 @@ end
 
 
 
+
+
 % some plots
 figure; 
 plot(hf.event_total_sizes, max_lag/4/24, '*'); title('event size vs lag')
@@ -51,6 +53,8 @@ plot(hf.event_total_sizes, max_lag/4/24, '*'); title('event size vs lag')
 x1 = transpose(hf.event_total_sizes);
 [b,bint,r,rint,stats]  = regress(max_lag/4/24,[ones(size(x1)) x1] );
 
+
+%%% woops  pasted here??
 figure; insolation = csvread('../Insolation.csv')
 
 l = length(hf.usgs_timeseries.cdom);
@@ -59,6 +63,8 @@ months = month(hf.usgs_timeseries_timestamps);
 X = [ones(l) insolation(months,2)]
 
 Y = hf.usgs_timeseries.cdom;
+%%%%%%
+
 hold on;
 plot(hf.event_total_sizes, max_lag/4/24, '*'); title('event size vs lag')
 plot(hf.event_total_sizes, y)
@@ -67,7 +73,7 @@ hold off;
 
 figure;
 MonthNum = month(hf.event_start_dates);
-plot(MonthNum, max_lag/4/24, '*'); title('month size vs lag')
+plot(MonthNum(1,1:10), hf.event_total_sizes(MonthNum(1,1:10)), '*'); title('month num vs lag')
 
 
 x1 = transpose(MonthNum);
