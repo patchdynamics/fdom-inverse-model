@@ -82,7 +82,6 @@ y = hf.usgs_timeseries.cdom(1:l);
 
 ym = b(1) + b(2) * temperatures ; 
 
-
 figure; 
 [hax, hLine1, hLine2] = ...
 plotyy(hf.usgs_timeseries_timestamps(1:l), y, hf.usgs_timeseries_timestamps(1:l), ym);
@@ -94,6 +93,22 @@ figure;
 plotyy(hf.usgs_timeseries_timestamps(1:l), y, hf.usgs_timeseries_timestamps(1:l), temperatures);
 datetick(hax(1), 'keeplimits');
 datetick(hax(2), 'keeplimits');
+
+
+% mass flow
+datevecs = datevec(hf.usgs_timeseries_timestamps);
+days_of_years = datevec2doy(datevecs);
+years = datevecs(:,1);
+index = (years - 2012) * 365 + days_of_years;
+temperature_avg = csvread('../R/temperature_avg.matlab.interp.csv');
+temperatures = temperature_avg(index,4);
+l = length(temperatures);
+X = [ones(l, 1) temperatures ];
+y = hf.usgs_timeseries_filtered_doc_mass_flow
+
+[b,bint,r,rint,stats] = regress(y,X); 
+ym = b(1) + b(2) * temperatures ; 
+
 
 
 
