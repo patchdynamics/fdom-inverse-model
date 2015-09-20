@@ -1,4 +1,4 @@
-datevecs = datevec(hf.usgs_timeseries_timestamps);
+datevecs = datevec(timestamps);
 years = datevecs(:,1);
 months = datevecs(:,2);
 index = (years - 2012) * 12 + months;
@@ -11,12 +11,20 @@ pdsi_series = pdsi(index);
 
 l = length(index);
 X = [ones(l, 1) pdsi_series ];
-y = hf.usgs_timeseries.cdom(1:l);
+y = timeseries(1:l);
 
 [b,bint,r,rint,stats] = regress(y,X); 
 
+result = [ stats(1), stats(3), b(2)]
+
 ym = b(1) + b(2) * pdsi_series ; 
 
+figure; 
+hold on;
+plot(timestamps(1:l), y);
+plot(timestamps(1:l), ym);
+datetick('x', 'keeplimits');
+hold off;
 
 figure; 
 [hax, hLine1, hLine2] = ...

@@ -1,18 +1,30 @@
 insolation_data = csvread('../Insolation.csv')
 
-
-l = length(hf.usgs_timeseries.cdom);
-months = month(hf.usgs_timeseries_timestamps);
+mode = 2;
+switch mode
+    case 1
+        timeseries = hf.usgs_timeseries.cdom;
+        timestamps = hf.usgs_timeseries_timestamps;
+    case 2
+        timeseries = hf.usgs_daily_means.cdom;
+        timestamps = hf.usgs_daily_means_timestampes;
+    case 3
+        timeseries = hf.usgs_daily_means.doc_mass_flow;
+        timestamps = hf.usgs_daily_means_timestampes;
+end
+        
+l = length(timeseries);
+months = month(timestamps);
 insolation_series = insolation_data(months,2);
 
 X = [ones(l, 1) insolation_series ];
-y = hf.usgs_timeseries.cdom;
+y = timeseries;
 
 [b,bint,r,rint,stats] = regress(y,X);   
 
 ym = b(1) + b(2) * insolation_series; 
 
-figure; plotyy((1:l), hf.usgs_timeseries.cdom, (1:l), ym);
+figure; plotyy((1:l), timeseries, (1:l), ym);
 % R^2 around .35
 
 
@@ -62,11 +74,11 @@ figure; plotyy((1:l), y, (1:l), ym);
 % going to need to match up by day somehow
 % get year and get day, index into csv file
 
-datevecs = datevec(hf.usgs_timeseries_timestamps);
+datevecs = datevec(timestamps);
 days_of_years = datevec2doy(datevecs);
 years = datevecs(:,1);
 index = (years - 2012) * 365 + days_of_years;
-%index(index > 1094) = []; % there's some extra past 2014
+index(index > 1094) = []; % there's some extra past 2014.  skip 2015
 
 temperature_avg = csvread('../R/temperature_avg.matlab.interp.csv');
 
@@ -74,7 +86,7 @@ temperatures = temperature_avg(index,4);
 l = length(temperatures);
 X = [ones(l, 1) temperatures ];
 
-y = hf.usgs_timeseries.cdom(1:l);
+y = timeseries(1:l);
 % y = hf.usgs_timeseries_filtered_doc_mass_flow;
 
 
@@ -83,14 +95,15 @@ y = hf.usgs_timeseries.cdom(1:l);
 ym = b(1) + b(2) * temperatures ; 
 
 figure; 
-[hax, hLine1, hLine2] = ...
-plotyy(hf.usgs_timeseries_timestamps(1:l), y, hf.usgs_timeseries_timestamps(1:l), ym);
-datetick(hax(1), 'keeplimits');
-datetick(hax(2), 'keeplimits');
+hold on;
+plot(timestamps(1:l), y);
+plot(timestamps(1:l), ym);
+datetick('x', 'keeplimits');
+hold off;
 
 figure; 
 [hax, hLine1, hLine2] = ...
-plotyy(hf.usgs_timeseries_timestamps(1:l), y, hf.usgs_timeseries_timestamps(1:l), temperatures);
+plotyy(timestamps(1:l), y, timestamps(1:l), temperatures);
 datetick(hax(1), 'keeplimits');
 datetick(hax(2), 'keeplimits');
 
@@ -144,46 +157,65 @@ plot(C);
 hold off;
 legend('Normalized Julian 1st Order DOC', 'Normalized Insolation', 'Indicator');
 
-% now inverse model this indicator
-datevecs = datevec(hf.usgs_timeseries_timestamps);
+% inverse model whatever we want to
+datevecs = datevec(timestamps);
 days_of_years = datevec2doy(datevecs);
 days_of_years(days_of_years == 366) = 365;
 
+% choose indicator
 indicator_series = C(days_of_years);
+%indicator_series = seasonal_doc_normalized(days_of_years);
 
-l = length(hf.usgs_timeseries_timestamps);
+l = length(timestamps);
 X = [ones(l, 1) indicator_series ];
-y = hf.usgs_timeseries.cdom;
+y = timeseries;
 
 [b,bint,r,rint,stats] = regress(y,X);   
 
 ym = b(1) + b(2) * indicator_series; 
 figure; 
-[hax, hLine1, hLine2] = plotyy(hf.usgs_timeseries_timestamps, hf.usgs_timeseries.cdom, hf.usgs_timeseries_timestamps, ym);
-datetick(hax(1), 'keeplimits');
-datetick(hax(2), 'keeplimits');
+hold on;
+plot(timestamps(1:l), y);
+plot(timestamps(1:l), ym);
+datetick('x', 'keeplimits');
+hold off;
+stats(1)
+stats(3)
+b(2)
 
 
 
 % snow
 snow_melt = csvread('/Users/matthewxi/Documents/Projects/PrecipGeoStats/snow/snow_scatch.txt');
-datevecs = datevec(hf.usgs_timeseries_timestamps);
+datevecs = datevec(timestamps);
 years = datevecs(:,1);
 julian_days = datevec2doy(datevecs);
 
 index = (years - 2012) * 365 + julian_days;
 snow_melt_series = snow_melt(:,2);
 indicator_series = snow_melt_series(index);
+%indicator_series = nthroot(snow_melt_series(index),4);
+%indicator_series = snow_melt_series(index) > 1;
 
-l = length(hf.usgs_timeseries_timestamps);
+l = length(timestamps);
 X = [ones(l, 1) indicator_series ];
-y = hf.usgs_timeseries_filtered_doc_mass_flow;
+y = timeseries;
 
 [b,bint,r,rint,stats] = regress(y,X);   
 
 ym = b(1) + b(2) * indicator_series; 
+
+
 figure; 
-[hax, hLine1, hLine2] = plotyy(hf.usgs_timeseries_timestamps, y, hf.usgs_timeseries_timestamps, ym);
+hold on;
+plot(timestamps(1:l), y);
+plot(timestamps(1:l), ym);
+datetick('x', 'keeplimits');
+hold off;
+
+
+figure; 
+[hax, hLine1, hLine2] = plotyy(timestamps, y, timestamps, ym);
 datetick(hax(1), 'keeplimits');
 datetick(hax(2), 'keeplimits');
 
