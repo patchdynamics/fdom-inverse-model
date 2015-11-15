@@ -26,6 +26,14 @@ ym = b(1) + b(2) * insolation_series;
 
 figure; plotyy((1:l), timeseries, (1:l), ym);
 % R^2 around .35
+figure;
+hold on;
+plot(timestamps, timeseries);
+plot(timestamps, ym);
+datetick('x');
+ylabel('Mass Flow');
+legend('Sensor', 'Modeled');
+hold off;
 
 
 % other models
@@ -107,6 +115,57 @@ plotyy(timestamps(1:l), y, timestamps(1:l), temperatures);
 datetick(hax(1), 'keeplimits');
 datetick(hax(2), 'keeplimits');
 
+% insolation NARR
+datevecs = datevec(timestamps);
+days_of_years = datevec2doy(datevecs);
+years = datevecs(:,1);
+index = (years - 2012) * 365 + days_of_years;
+index(index > 1094) = []; % there's some extra past 2014.  skip 2015
+
+dswrf = csvread('../R/dswrf.csv');
+
+
+
+dswrfs = dswrf(index,4);
+indicator = dswrfs;
+indicator = lastthree / 100000;
+indicator = lastthree.^2 / 100000;
+indicator = log(lastthree / 100000)
+indicator = log(dswrfs / 100000)
+indicator = log(lastfive / 100000)
+indicator = log(dswrfs);
+
+
+l = length(indicator);
+X = [ones(l, 1) indicator ];
+
+
+y = timeseries(1:l);
+% y = hf.usgs_timeseries_filtered_doc_mass_flow;
+
+
+[b,bint,r,rint,stats] = regress(y,X); 
+stats(1)
+
+ym = b(1) + b(2) * indicator ; 
+
+figure; 
+hold on;
+plot(timestamps(1:l), y(1:l));
+plot(timestamps(1:l), ym(1:l));
+datetick('x', 'keeplimits');
+hold off;
+
+r = y - ym;
+figure;
+plot(timestamps(1:l), r(1:l));
+
+figure; 
+[hax, hLine1, hLine2] = ...
+plotyy(timestamps(1:l), y, timestamps(1:l), temperatures);
+datetick(hax(1), 'keeplimits');
+datetick(hax(2), 'keeplimits');
+
 
 % mass flow
 datevecs = datevec(hf.usgs_timeseries_timestamps);
@@ -163,16 +222,16 @@ days_of_years = datevec2doy(datevecs);
 days_of_years(days_of_years == 366) = 365;
 
 % choose indicator
-indicator_series = C(days_of_years);
-%indicator_series = seasonal_doc_normalized(days_of_years);
+variable_timeseries = C(days_of_years);
+%variable_timeseries = seasonal_doc_normalized(days_of_years);
 
 l = length(timestamps);
-X = [ones(l, 1) indicator_series ];
+X = [ones(l, 1) variable_timeseries ];
 y = timeseries;
 
 [b,bint,r,rint,stats] = regress(y,X);   
 
-ym = b(1) + b(2) * indicator_series; 
+ym = b(1) + b(2) * variable_timeseries; 
 figure; 
 hold on;
 plot(timestamps(1:l), y);
@@ -193,17 +252,17 @@ julian_days = datevec2doy(datevecs);
 
 index = (years - 2012) * 365 + julian_days;
 snow_melt_series = snow_melt(:,2);
-indicator_series = snow_melt_series(index);
-%indicator_series = nthroot(snow_melt_series(index),4);
-%indicator_series = snow_melt_series(index) > 1;
+variable_timeseries = snow_melt_series(index);
+%variable_timeseries = nthroot(snow_melt_series(index),4);
+%variable_timeseries = snow_melt_series(index) > 1;
 
 l = length(timestamps);
-X = [ones(l, 1) indicator_series ];
+X = [ones(l, 1) variable_timeseries ];
 y = timeseries;
 
 [b,bint,r,rint,stats] = regress(y,X);   
 
-ym = b(1) + b(2) * indicator_series; 
+ym = b(1) + b(2) * variable_timeseries; 
 
 
 figure; 
@@ -287,4 +346,63 @@ ylabel('DOC Mass Flow');
 
 samexaxis()
 
+
+
+
+% precip series
+precip_totals = zeros(length(timestamps),1);
+for j = 1:length(timestamps)
+                    
+                    if isKey(hf.precipitation_map, timestamps(j))
+                        precip_totals(j) = hf.precipitation_map(timestamps(j));
+                    end
+end
+
+
+
+
+% moving average
+% last 3 days (transit time)
+
+lastthree = zeros(length(dswrfs),1);
+lastthree(1) = dswrfs(1);
+lastthree(2) = dswrfs(2);
+for i=3:length(dswrfs)
+    lastthree(i) = dswrfs(i) + dswrfs(i-1) + dswrfs(i-2);
+    lastthree(i) = lastthree(i) / 3;
+end
+
+lastfive = zeros(length(dswrfs),1);
+lastfive(1) = dswrfs(1);
+lastfive(2) = dswrfs(2);
+lastfive(3) = dswrfs(3);
+lastfive(4) = dswrfs(4);
+for i=5:length(dswrfs)
+    lastfive(i) = dswrfs(i) + dswrfs(i-1) + dswrfs(i-2) + dswrfs(i-3) + dswrfs(i-4);
+    lastfive(i) = lastfive(i) / 5;
+end
+
+len = 7;
+indicator = zeros(length(dswrfs),1);
+for i = 1:len-1
+    indicator(i) = dswrfs(i);
+end
+for i=len:length(dswrfs)
+    for j = 0:len-1
+        indicator(i) = indicator(i) + dswrfs(i-j); 
+    end
+    indicator(i) = indicator(i) / len;
+end
+indicator = log(indicator);
+
+l = length(indicator);
+X = [ones(l, 1) indicator ];
+
+
+y = timeseries(1:l);
+% y = hf.usgs_timeseries_filtered_doc_mass_flow;
+
+
+[b,bint,r,rint,stats] = regress(y,X); 
+stats(1)
 

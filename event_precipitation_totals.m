@@ -71,11 +71,11 @@ for i = 1:num
     figure;
     plot(hf.usgs_timeseries_timestamps(domain), hf.usgs_timeseries_filtered_doc_mass_flow_eq2(domain));
     datetick('x');
-    line([FlowStartIdxVector(i), FlowStartIdxVector(i)], [0, 10000000], 'Color', 'm')
-    line([FlowEndIdxVector(i), FlowEndIdxVector(i)], [0, 10000000], 'Color', 'm')
-    line([PrecipitationStartIdxVector(i), PrecipitationStartIdxVector(i)], [0, 10000000], 'Color', 'k')
-    line([PrecipitationEndIdxVector(i), PrecipitationEndIdxVector(i)], [0, 10000000], 'Color', 'k')
-    line([EventIdxVector(i), EventIdxVector(i)], [0, 10000000], 'Color', 'g')
+    line([hf.usgs_timeseries_timestamps(FlowStartIdxVector(i)), hf.usgs_timeseries_timestamps(FlowStartIdxVector(i))], [0, 10000000], 'Color', 'm')
+    line([hf.usgs_timeseries_timestamps(FlowEndIdxVector(i)), hf.usgs_timeseries_timestamps(FlowEndIdxVector(i))], [0, 10000000], 'Color', 'm')
+    line([hf.usgs_timeseries_timestamps(PrecipitationStartIdxVector(i)), hf.usgs_timeseries_timestamps(PrecipitationStartIdxVector(i))], [0, 10000000], 'Color', 'k')
+    line([hf.usgs_timeseries_timestamps(PrecipitationEndIdxVector(i)), hf.usgs_timeseries_timestamps(PrecipitationEndIdxVector(i))], [0, 10000000], 'Color', 'k')
+    line([hf.usgs_timeseries_timestamps(EventIdxVector(i)), hf.usgs_timeseries_timestamps(EventIdxVector(i))], [0, 10000000], 'Color', 'g')
 end
 
 EventIndices = [transpose(FlowStartIdxVector), transpose(FlowEndIdxVector), transpose(PrecipitationStartIdxVector), transpose(PrecipitationEndIdxVector), EventIdxVector]

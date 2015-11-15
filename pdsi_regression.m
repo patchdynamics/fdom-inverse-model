@@ -18,11 +18,12 @@ y = timeseries(1:l);
 result = [ stats(1), stats(3), b(2)]
 
 ym = b(1) + b(2) * pdsi_series ; 
-
+yn = y -  b(2) * pdsi_series;
 figure; 
 hold on;
 plot(timestamps(1:l), y);
 plot(timestamps(1:l), ym);
+plot(timestamps(1:l), yn);
 datetick('x', 'keeplimits');
 hold off;
 

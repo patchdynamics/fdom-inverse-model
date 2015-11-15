@@ -70,6 +70,10 @@ classdef haddam_fdom < handle
         snow_date_offset = 4; % initial delay for snow in days
         num_snow_history = 0;
         
+        enable_snow_bins = false;
+        snow_bin_sizes = [10];
+        num_snow_bins = 1;
+        
         pdsi;
        
         % stats
@@ -94,10 +98,10 @@ classdef haddam_fdom < handle
             hf = haddam_fdom();
             disp 'opening connection'
             hf.open_connection();
-            disp 'loading usgs timeseries'
-            hf.load_usgs_timeseries();
-            disp 'loading fdom corrected'
-            hf.load_fdom_corrected();
+            %disp 'loading usgs timeseries'
+            %hf.load_usgs_timeseries();
+            %disp 'loading fdom corrected'
+            %hf.load_fdom_corrected();
         end
         
         function [hf] = start_usgs_timeseries()
@@ -171,7 +175,7 @@ classdef haddam_fdom < handle
         end
         
         function load_usgs_timeseries(obj)
-            sqlquery = sprintf(['select timestamp,cdom,discharge,doc_mass_flow,doc_mass_flow_eq2,doc_concentration,doc_concentration_eq2,doxygen,nitrate,conductance,turbidity,ph,temperature from haddam_timeseries_usgs_extended '...
+            sqlquery = sprintf(['select timestamp,cdom,discharge,doc_mass_flow,doc_mass_flow_eq2,doc_concentration,doc_concentration_eq2,doxygen,nitrate,conductance,turbidity,ph,temperature,month from haddam_timeseries_usgs_extended '...
                 'where cdom > 0 and ' ...
                 'timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
                 'order by timestamp asc'], obj.start_date, obj.end_date);
@@ -201,7 +205,7 @@ classdef haddam_fdom < handle
         end
         
         function load_usgs_timeseries_without_spring(obj)
-            sqlquery = sprintf(['select timestamp,cdom,discharge from haddam_timeseries_usgs '...
+            sqlquery = sprintf(['select timestamp,cdom,discharge,ph,doc_mass_flow from haddam_timeseries_usgs_extended '...
                 'where cdom > 0 ' ...
                 'and month > 5 ' ...
                 'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
@@ -219,10 +223,17 @@ classdef haddam_fdom < handle
             
              if mode == 1 % skip fouled data
                  
-               sqlquery = sprintf(['select timestamp,cdom,discharge,doc_mass_flow from haddam_download_usgs '...
+               sqlquery = sprintf(['select timestamp,cdom,discharge,doc_mass_flow,temp,turbidity from haddam_download_usgs '...
                     'where cdom > 0 ' ...
                     'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
                     'AND ( timestamp <= to_timestamp(''2013-07-10'', ''YYYY-MM-DD'') OR timestamp >= to_timestamp(''2013-09-10'', ''YYYY-MM-DD'') )'...
+                    'order by timestamp asc'], obj.start_date, obj.end_date);
+             elseif mode == 2 % skip fouled data and spring freshet
+                 sqlquery = sprintf(['select timestamp,cdom,discharge,doc_mass_flow from haddam_download_usgs '...
+                    'where cdom > 0 ' ...
+                    'and timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                    'AND ( timestamp <= to_timestamp(''2013-07-10'', ''YYYY-MM-DD'') OR timestamp >= to_timestamp(''2013-09-10'', ''YYYY-MM-DD'') )'...
+                    'AND ( month < 4 OR month > 5 )'...
                     'order by timestamp asc'], obj.start_date, obj.end_date);
              else
             
@@ -544,18 +555,31 @@ classdef haddam_fdom < handle
          end
         
         function load_precipitation(obj)
+            obj.start_date = '2009-01-01';
+            obj.end_date = '2016-01-01';
             sqlquery = sprintf(['select total_precipitation, timestamp from total_macrowatershed_precipitation ' ...
                 'where timestamp >= to_timestamp(''%s'', ''YYYY-MM-DD'') and timestamp <= to_timestamp(''%s'', ''YYYY-MM-DD'') order by timestamp'], ...
                 obj.start_date, obj.end_date);
-            disp sqlquery;
+            sqlquery
             curs = exec(obj.conn,sqlquery);
             setdbprefs('DataReturnFormat','structure');
             curs = fetch(curs);
             obj.precipitation_data = curs.Data;
             obj.precipitation_timestamps = datenum(obj.precipitation_data.timestamp)
                % organize the precipitation for lookup
+               
+             % make it stationary
+            %p1 = obj.precipitation_data.total_precipitation;
+            %p2 = obj.precipitation_data.total_precipitation;
+            %p2(1) = [];
+            %p1(end) = [];
+            %p = p2 - p1;
+            %obj.precipitation_timestamps(1) = [];
+            %obj.precipitation_data.total_precipitation = (p / max(p) );
+            % this way of making the data stationary does not work
+            % because we need the 0 values to make this model make sense
+            % or else the FDOM signal also must be stationarized
             obj.precipitation_map = containers.Map(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
-          
         end
         
         function plot_precipitation(obj)
@@ -912,9 +936,9 @@ classdef haddam_fdom < handle
         
         function load_snowmelt(obj)
             snow_melt_data = csvread('/Users/matthewxi/Documents/Projects/PrecipGeoStats/snow/snow_scatch.txt');
-            %obj.snow_melt = snow_melt_data(:,2) / 1000 ;  % divide to avoid precision errors            
+            obj.snow_melt = snow_melt_data(:,2) / 1000 ;  % divide to avoid precision issues            
             %obj.snow_melt = sqrt(snow_melt_data(:,2)) ; 
-            obj.snow_melt = nthroot(snow_melt_data(:,2),4); 
+            %obj.snow_melt = nthroot(snow_melt_data(:,2),4); 
 
             obj.snow_melt_timestamps = datenum(num2str(snow_melt_data(:,1)), 'yyyymmdd');
             obj.snow_map = containers.Map(obj.snow_melt_timestamps, obj.snow_melt );
@@ -934,28 +958,29 @@ classdef haddam_fdom < handle
             sample_count = size(timestamps);
             sample_count = sample_count(1);
             %sample_count = 10;
-            obj.K = zeros(sample_count, obj.num_history_days + 1);  % should size based off seasonal mode
+            obj.K = zeros(sample_count, obj.num_history_days + obj.enable_y_intercept);  % should size based off seasonal mode
             
             for i=1:sample_count
-                date = obj.usgs_timeseries_subset_timestamps(i);
+                date = timestamps(i);
                 
                 precip_totals = zeros(obj.num_history_days, 1);
-                for j = 1:obj.num_history_days
+                for j = 2:obj.num_history_days+1
                     if(j == 1)
                         d = date;  % start with the current day
                     else
                         d = date - (j-1);
                     end
-                    precip_totals(j) = 0;
+                   
+                    precip_totals(j-1) = 0;
                     if isKey(obj.precipitation_map, d)
-                        precip_totals(j) = obj.precipitation_map(d);
+                        precip_totals(j-1) = obj.precipitation_map(d);
                     end
                 end
                 
                 offset = 0;
                 if(obj.enable_y_intercept)
                     offset = offset + 1;
-                    obj.K(i, 1) = 1;  % so an idea is to change the forward problem to remove y offset
+                    obj.K(i, 1) = 1;  
                 end
                 
                 if(obj.enable_snow)
@@ -983,6 +1008,22 @@ classdef haddam_fdom < handle
                     end
                 end
                 
+               if(obj.enable_snow_bins)
+                    for bin = 1:obj.num_snow_bins
+                      offset = offset + 1;
+                      binned_snow= 0;
+                      previos_bin_offset = sum(obj.snow_bin_sizes(1:bin-1));
+                      for l = 1:obj.snow_bin_sizes(bin)
+                        d = date - obj.num_snow_history - previos_bin_offset - l;
+                             if isKey(obj.snow_map, d)
+                                 binned_snow = binned_snow + obj.snow_map(d);
+                              end
+                      end
+                      obj.K(i, offset) = binned_snow;
+                    end
+                end
+                
+                
                 for j = 1:obj.num_history_days
                     obj.K(i, j+offset) = precip_totals(j);
                 end
@@ -997,7 +1038,7 @@ classdef haddam_fdom < handle
                     if( str2double(datestr(date, 'mm')) > 9)
                         obj.K(i, obj.num_history_days+offset+1) = 1;
                     else
-                        obj.K(i, obj.num_history_days+offset+1) = 0;
+                        obj.K(i, obj.num_history_days+offset+1) = 0;hf.s
                     end
                 elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
                     haddam_fdom.day_of_year(date);
@@ -1061,7 +1102,9 @@ classdef haddam_fdom < handle
             sample_count = size(timestamps);
             sample_count
             
+            % obj.predicted_values = obj.z * obj.K
            
+            % so this should just be obj.a * obj.K
             
             obj.predicted_values = zeros(sample_count);
             
@@ -1111,8 +1154,22 @@ classdef haddam_fdom < handle
                         end
                         obj.predicted_values(i) = obj.predicted_values(i) + obj.a(offset) *  binned_precip;
                     end
-                end
+                 end
                 
+                  if(obj.enable_snow_bins)
+                    for bin = 1:obj.num_snow_bins
+                        offset = offset + 1;
+                        binned_snow = 0;
+                        previos_bin_offset = sum(obj.snow_bin_sizes(1:bin-1));
+                        for l = 1:obj.snow_bin_sizes(bin)
+                            d = date - obj.num_snow_history - previos_bin_offset - l;
+                            if isKey(obj.snow_map, d)
+                                binned_snow = binned_snow + obj.snow_map(d);
+                            end
+                        end
+                        obj.predicted_values(i) = obj.predicted_values(i) + obj.a(offset) *  binned_snow;
+                    end
+                  end
                 
                 % add up the predictor variables
                 for j = 1:obj.num_history_days
@@ -1246,6 +1303,8 @@ classdef haddam_fdom < handle
         
        function inverse_model_cdom(obj, mode)
            obj.enable_y_intercept = true;
+           obj.num_bins = 0;
+           obj.bin_sizes = [20];
            obj.seasonal_mode = obj.seasonal_mode_insolation;
            if mode == 4
                obj.seasonal_mode = obj.seasonal_mode_none;
@@ -1257,6 +1316,29 @@ classdef haddam_fdom < handle
            obj.solve_inverse;
            obj.predict(obj.usgs_daily_means_timestampes);
            obj.plot_prediction(obj.usgs_daily_means.cdom, obj.predicted_values, obj.usgs_daily_means_timestampes);
+           rsquare(obj.usgs_daily_means.cdom, obj.predicted_values)
+       end
+       
+        function inverse_model_cdom_stationarized(obj, mode)
+           obj.enable_y_intercept = true;
+           obj.num_bins = 0;
+           obj.bin_sizes = [20];
+           obj.seasonal_mode = obj.seasonal_mode_insolation;
+           if mode == 4
+               obj.seasonal_mode = obj.seasonal_mode_none;
+               mode = 1;
+           end
+           
+           obj.load_values_cdom(mode);
+           obj.build_predictor_matrix(obj.usgs_timeseries_subset_timestamps);
+           obj.solve_inverse;
+           obj.predict(obj.usgs_daily_means_timestampes(2:end));
+           
+           cdom1 = obj.usgs_daily_means.cdom(1:end-1);
+           cdom2 = obj.usgs_daily_means.cdom(2:end);
+           cdom = cdom2-cdom1;
+           
+           obj.plot_prediction_st(cdom, obj.predicted_values, obj.usgs_daily_means_timestampes(2:end));
            rsquare(obj.usgs_daily_means.cdom, obj.predicted_values)
        end
         
@@ -1446,7 +1528,7 @@ classdef haddam_fdom < handle
        function inverse_model_mass_flow(obj)
            obj.enable_y_intercept = true;
            obj.enable_snow = true;
-           obj.seasonal_mode = obj.seasonal_mode_none;
+           obj.seasonal_mode = obj.seasonal_mode_insolation;
            obj.load_values('doc_mass_flow');
            
            obj.build_predictor_matrix(obj.usgs_timeseries_subset_timestamps);
@@ -1466,7 +1548,16 @@ classdef haddam_fdom < handle
            obj.solve_inverse
            obj.predict(obj.usgs_timeseries_subset_timestamps);
            obj.plot_prediction(  obj.usgs_timeseries_subset.value );
+       end
+        
+        function inverse_model_discharge(obj)
+           obj.seasonal_mode = obj.seasonal_mode_none;
+           obj.build_inversion('discharge_tidally_filtered');
+           obj.solve_inverse
+           obj.predict(obj.usgs_timeseries_subset_timestamps);
+           obj.plot_prediction(  obj.usgs_timeseries_subset.value );
         end
+        
         
        function inverse_model_turbidity(obj)
            obj.seasonal_mode = obj.seasonal_mode_12_month;
@@ -1604,8 +1695,15 @@ classdef haddam_fdom < handle
             curs = fetch(curs);
             obj.usgs_timeseries_subset = curs.Data;
             obj.usgs_timeseries_subset_timestamps = datenum(obj.usgs_timeseries_subset.timestamp);
-            obj.y =  obj.usgs_timeseries_subset.value;
+            obj.y = obj.usgs_timeseries_subset.value;
 
+            % stationarize this..
+            % y1 = obj.y;
+            % y2 = obj.y;
+            % y1(end) = [];
+            % y2(1) = [];
+            % obj.y = y2 - y1;
+            % obj.usgs_timeseries_subset_timestamps(1) = [];
      
             % should do interp, not set to zero
             % or just remove entirely might be a better approach
@@ -1617,7 +1715,8 @@ classdef haddam_fdom < handle
      
             if strcmp(field, 'cdom')
                 % do some preprocessing
-                obj.y(obj.y < 17) = 17;
+                % what is the meaning of this exactly ??
+                %obj.y(obj.y < 17) = 17;
             end
              
          end
@@ -1627,8 +1726,11 @@ classdef haddam_fdom < handle
             s_date = obj.parameterization_start_date;
             e_date = obj.parameterization_end_date;
             
+            % always skipping the fouling period
+            
             sqlquery = sprintf(['select date, %s as value from haddam_timeseries_daily_avg '...
                 'where date >= to_timestamp(''%s'', ''YYYY-MM-DD'') and date <= to_timestamp(''%s'', ''YYYY-MM-DD'') '...
+                'AND ( timestamp <= to_timestamp(''2013-07-10'', ''YYYY-MM-DD'') OR timestamp >= to_timestamp(''2013-09-10'', ''YYYY-MM-DD'') )'...
                 'and %s > 0 ' ...
                 'order by date asc'], field, s_date, e_date, field);
                      
@@ -1737,6 +1839,46 @@ classdef haddam_fdom < handle
             datetick(hax(2));
             set(hax(1),'YLim',[0 max_observed])
             set(hax(2),'YLim',[0 max_observed])
+            set(hax(1),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
+            set(hax(2),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
+            title('Comparison');
+            legend('Sensor Values', 'Modeled Values',  'Location', 'northwest');
+            
+        end
+        
+          function plot_prediction_st(obj, observed, prediction, timestamps)
+            figure();
+            max_observed = max(observed);
+            %max_observed = 100;
+            
+            subplot(4,1,1);
+            plot(timestamps, observed - prediction);
+            datetick('x');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            ylim([-max_observed,max_observed]);
+            title('Residuals');
+            
+            subplot(4,1,2);
+            plot(timestamps, observed, 'o', 'MarkerSize',1);
+            datetick('x');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            ylim([-max_observed,max_observed]);
+            title('Observed Values');
+            
+            
+            subplot(4,1,3);
+            plot(obj.precipitation_timestamps, obj.precipitation_data.total_precipitation);
+            datetick('x');
+            xlim([datenum(obj.start_date) datenum(obj.end_date)]);
+            title('Precipitation');
+            
+            subplot(4,1,4);
+            [hax, ~, ~] = plotyy(timestamps, observed, ...
+                timestamps, prediction);
+            datetick(hax(1));
+            datetick(hax(2));
+            set(hax(1),'YLim',[-max_observed max_observed])
+            set(hax(2),'YLim',[-max_observed max_observed])
             set(hax(1),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
             set(hax(2),'XLim',[datenum(obj.start_date) datenum(obj.end_date)])
             title('Comparison');
