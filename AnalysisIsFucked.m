@@ -1,5 +1,6 @@
 fdom_cleaned(:,4) = fdom_cleaned(:,1) + 693959;
 u = unique(fdom_cleaned(:,4));
+daily_averages = zeros(2);
 for i = 1:length(u)
    daily_averages(i, :) = [u(i) , mean(fdom_cleaned(fdom_cleaned(:,4) == u(i),2))];
 end

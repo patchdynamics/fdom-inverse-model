@@ -1038,7 +1038,7 @@ classdef haddam_fdom < handle
                     if( str2double(datestr(date, 'mm')) > 9)
                         obj.K(i, obj.num_history_days+offset+1) = 1;
                     else
-                        obj.K(i, obj.num_history_days+offset+1) = 0;hf.s
+                        obj.K(i, obj.num_history_days+offset+1) = 0;
                     end
                 elseif(obj.seasonal_mode == obj.seasonal_mode_modeled  )
                     haddam_fdom.day_of_year(date);

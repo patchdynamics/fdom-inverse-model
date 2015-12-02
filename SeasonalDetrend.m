@@ -13,6 +13,10 @@ timestamps = daily_averages(:,1);
 y = y_interp;
 timestamps = full_timestamps;
 
+y = daily_averages(400:end,2);
+timestamps = daily_averages(400:end,1);
+
+
 % 1) Detrend linear
 X = [ones(length(timestamps),1) timestamps];
 
@@ -43,9 +47,11 @@ one_cycle = movavg(366+15:366+15+365,:);
 
 % now detrend with the moving average
 y_detrended = y_linear_detrend;
+trend_timeseries = zeros(1,0);
 for i = 1:length(timestamps)
     trend = one_cycle(julian_days(i));
     y_detrended(i) = y_detrended(i) - trend + mean(one_cycle);
+    trend_timeseries(i) = trend;
 end
 
 % try to get 2 sinusoids out of the trend signal
@@ -58,17 +64,17 @@ y_cycle = X * b;
 
 figure; hold on; plot(one_cycle); plot(y_cycle); hold off;
 
-
+figure; hold on; plot(timestamps, y_linear_detrend); plot(timestamps, trend_timeseries); datetick('x'); hold off;
 
 % another approach : just remove the moving average
 % need to start by interpolating the entire timeseries
 
-full_timestamps = transpose(min(timestamps):1:max(timestamps));
-y_interp = NaN(size(full_timestamps));
-for i = 1:length(timestamps)
-    y_interp(full_timestamps == timestamps(i)) = y_daily_original(i);
+full_timestamps = transpose(min(daily_averages(:,1)):1:max(daily_averages(:,1)));
+y_interp_empty = NaN(size(full_timestamps));
+for i = 1:length(daily_averages)
+    y_interp_empty(full_timestamps == daily_averages(i,1)) = daily_averages(i,2);
 end
-y_interp = fixgaps(y_interp);
+y_interp = fixgaps(y_interp_empty);
 
 window = 29;
 interval = floor(window / 2);
