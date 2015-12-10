@@ -139,7 +139,8 @@ classdef haddam_fdom < handle
             hf = haddam_fdom();
             hf.open_connection();
             hf.load_usgs_timeseries();
-            hf.load_precipitation();
+            hf.load_precipitation
+            itation();
             hf.load_seasonal_doc_julian();
             hf.build_predictor_matrix;
             hf.solve_inverse;
@@ -885,7 +886,7 @@ classdef haddam_fdom < handle
             set(f, 'Position', [0 0 1600 800]);
             hold on;
             for i=1:6
-                subplot(6,1,i);
+                subplot(7,1,i);
                 totals = obj.metabasin_precipitation_totals.sums{i}.getArray;
                 dates = obj.metabasin_precipitation_totals.timestamps{i}.getArray;
                 dates = char(dates);
@@ -898,6 +899,11 @@ classdef haddam_fdom < handle
                 ylim([0,800]);
                 
             end
+            subplot(7,1,7);
+            plot(obj.precipitation_timestamps(obj.precipitation_timestamps < datenum('2015-01-01')), obj.precipitation_data.total_precipitation(obj.precipitation_timestamps < datenum('2015-01-01')));
+            datetick('x');
+                            ylim([0,2200]);
+
         end
         
         function build_inversion_fdom(obj)
@@ -973,7 +979,17 @@ classdef haddam_fdom < handle
                    
                     precip_totals(j-1) = 0;
                     if isKey(obj.precipitation_map, d)
-                        precip_totals(j-1) = obj.precipitation_map(d);
+                        m = month(date);
+                        %if m < 5 
+                        %    mult = 1.5;
+                        %elseif m < 9
+                        %    mult = 1;
+                        %else
+                        %    mult = 2;
+                        %end
+                        mult = 1;
+                            
+                        precip_totals(j-1) = mult * obj.precipitation_map(d);
                     end
                 end
                 
@@ -1025,8 +1041,26 @@ classdef haddam_fdom < handle
                 
                 
                 for j = 1:obj.num_history_days
-                    obj.K(i, j+offset) = precip_totals(j);
+                    obj.K(i, j+offset) = precip_totals(j);           
                 end
+                
+                %for j = 1:obj.num_history_days
+                %    obj.K(i, obj.num_history_days+j+offset) = precip_totals(j)^2;      
+                %end
+                
+               % mutiply by previous day precip
+               % for j = 2:obj.num_history_days
+               %     obj.K(i, offset + obj.num_history_days + j-1) = precip_totals(j-1) * precip_totals(j);
+               % end
+                
+                % indicator variables for no precip
+                %for j = 1:2
+                %  no_precip = 0;
+                %  if precip_totals(j) == 0
+                %      no_precip = 1;
+                %  end
+                %  obj.K(i, obj.num_history_days+j+offset) = no_precip;
+                %end
                 
                 d = str2double(datestr(date, 'dd'));
                 

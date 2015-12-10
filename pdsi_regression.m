@@ -1,3 +1,5 @@
+pdsi_dates = datenum(2012,1:36,1);  % by the way
+
 datevecs = datevec(timestamps);
 years = datevecs(:,1);
 months = datevecs(:,2);

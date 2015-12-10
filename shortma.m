@@ -1,3 +1,6 @@
+fdom = ts(:,2);
+fdom = log(fdom-14)
+
 lags = 60;
 mashort = tsmovavg(fdom, 's', lags, 1);
 figure; hold on; plot(fdom(lags/2: end)); plot(mashort(lags:end));
@@ -10,9 +13,9 @@ yma = yma - shift;
 
 timestamps = ts(lags/2:end-lags/2,1);
 hf.build_predictor_matrix(timestamps);
-%[b,i,r,x,stats] = regress(yma,hf.K);
-result = olsc(yma, hf.K);
-b = result.beta
+[b,i,r,x,stats] = regress(yma,hf.K);
+%result = olsc(yma, hf.K);
+%b = result.beta
 
 ym = hf.K * b;
 figure; hold on; plot(yma); plot(ym);

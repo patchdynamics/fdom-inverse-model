@@ -34,7 +34,7 @@ ym = hf.K * b;
 figure; hold on; plot(ydiff); plot(ym);
 
 % short ma
-lags = 30;
+lags = 60;
 mashort = tsmovavg(fdom, 's', lags, 1);
 figure; hold on; plot(fdom(lags/2: end)); plot(mashort(lags:end));
 
